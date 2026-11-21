@@ -9,9 +9,8 @@
 //!   sessions, counted per day. Linear in clicks, even for shared devices.
 
 use crate::clicks::Click;
-use crate::sessions::{person_ranges, Session};
+use crate::sessions::Session;
 use crate::ts::MS_PER_DAY;
-use rayon::prelude::*;
 
 const WEEK: i64 = 7 * MS_PER_DAY;
 
@@ -26,11 +25,11 @@ pub struct CampaignDaily {
 }
 
 impl CampaignDaily {
-    fn new(ncamp: usize, first_day: i64, ndays: usize) -> Self {
+    pub fn new(ncamp: usize, first_day: i64, ndays: usize) -> Self {
         let n = (ncamp + 1) * ndays;
         CampaignDaily { ndays, first_day, sessions: vec![0; n], purchasing: vec![0; n], revenue: vec![0; n], assisted: vec![0; n] }
     }
-    fn add(&mut self, o: &CampaignDaily) {
+    pub fn add(&mut self, o: &CampaignDaily) {
         for (a, b) in [(&mut self.sessions, &o.sessions), (&mut self.purchasing, &o.purchasing), (&mut self.revenue, &o.revenue), (&mut self.assisted, &o.assisted)] {
             for (x, y) in a.iter_mut().zip(b) {
                 *x += y;
@@ -39,28 +38,8 @@ impl CampaignDaily {
     }
 }
 
-pub fn compute(sessions: &[Session], clicks: &[Click], ncamp: usize, first_day: i64, ndays: usize, threads: usize) -> CampaignDaily {
-    let ranges = person_ranges(sessions, threads * 8, |s| s.person);
-    ranges
-        .par_iter()
-        .map(|&(s0, s1)| {
-            let mut cd = CampaignDaily::new(ncamp, first_day, ndays);
-            let sess = &sessions[s0..s1];
-            // Clicks of the persons in this range.
-            let p_lo = sess[0].person;
-            let p_hi = sess[sess.len() - 1].person;
-            let c0 = clicks.partition_point(|c| c.person < p_lo);
-            let c1 = clicks.partition_point(|c| c.person <= p_hi);
-            walk(sess, &clicks[c0..c1], ncamp, &mut cd);
-            cd
-        })
-        .reduce(|| CampaignDaily::new(ncamp, first_day, ndays), |mut a, b| {
-            a.add(&b);
-            a
-        })
-}
-
-fn walk(sess: &[Session], clicks: &[Click], ncamp: usize, cd: &mut CampaignDaily) {
+/// Credit and assists for sessions and clicks of the same persons, both sorted by person.
+pub fn walk(sess: &[Session], clicks: &[Click], ncamp: usize, cd: &mut CampaignDaily) {
     let nd = cd.ndays;
     let day_idx = |start: i64| (start.div_euclid(MS_PER_DAY) - cd.first_day) as usize;
     let mut ci = 0;

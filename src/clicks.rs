@@ -7,7 +7,6 @@ use crate::csv;
 use crate::ids::{self, Key, KeyMap};
 use crate::ts;
 use crate::Ctx;
-use rayon::prelude::*;
 
 #[derive(Clone, Copy)]
 pub struct Click {
@@ -17,44 +16,33 @@ pub struct Click {
     pub camp: u16,
 }
 
-pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Click> {
+/// Parse and validate clicks, routed by person partition: `routed[chunk][partition]`.
+/// Copies of a click are identical, so they land in the same partition, where
+/// sorting makes them adjacent and dedup drops all but one.
+pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Vec<Vec<Click>>> {
     let lo = ctx.window_start - 7 * ts::MS_PER_DAY;
     let hi = ctx.window_end;
-    let t0 = std::time::Instant::now();
-    let parts: Vec<Vec<Click>> = src.par_map(|c| {
-            let mut out = Vec::with_capacity(c.len() / 45 + 16);
-            for line in csv::lines(c) {
-                let mut f = [None; 4];
-                if !csv::fields::<4>(line, &mut f) {
-                    continue;
-                }
-                let (Some(cid), Some(user), Some(camp), Some(t)) = (f[0], f[1], f[2], f[3]) else {
-                    continue;
-                };
-                let Some(camp) = ctx.campaign_of(ids::pack(camp)) else { continue };
-                let Some(t) = ts::parse_ts(t) else { continue };
-                if t < lo || t >= hi {
-                    continue;
-                }
-                let user = ids::pack(user);
-                out.push(Click {
-                    person: persons.get(&user).copied().unwrap_or(user),
-                    cid: ids::pack(cid),
-                    ts: t,
-                    camp,
-                });
+    let parts = crate::partition::PARTS;
+    src.par_map(|c| {
+        let est = c.len() / 45 / parts + 4;
+        let mut out: Vec<Vec<Click>> = (0..parts).map(|_| Vec::with_capacity(est)).collect();
+        for line in csv::lines(c) {
+            let mut f = [None; 4];
+            if !csv::fields::<4>(line, &mut f) {
+                continue;
             }
-            out
-        });
-    eprintln!("    clicks parse   {:.3}s", t0.elapsed().as_secs_f64());
-    let tc = std::time::Instant::now();
-    let mut v = crate::par::par_concat(parts);
-    eprintln!("    clicks concat  {:.3}s ({} clicks)", tc.elapsed().as_secs_f64(), v.len());
-    let t1 = std::time::Instant::now();
-    v.par_sort_unstable_by(|a, b| {
-        a.person.cmp(&b.person).then(a.ts.cmp(&b.ts)).then_with(|| ids::cmp_ids(a.cid, b.cid))
-    });
-    v.dedup_by(|b, a| a.cid == b.cid && a.person == b.person && a.ts == b.ts);
-    eprintln!("    clicks sort    {:.3}s", t1.elapsed().as_secs_f64());
-    v
+            let (Some(cid), Some(user), Some(camp), Some(t)) = (f[0], f[1], f[2], f[3]) else {
+                continue;
+            };
+            let Some(camp) = ctx.campaign_of(ids::pack(camp)) else { continue };
+            let Some(t) = ts::parse_ts(t) else { continue };
+            if t < lo || t >= hi {
+                continue;
+            }
+            let user = ids::pack(user);
+            let person = persons.get(&user).copied().unwrap_or(user);
+            out[crate::partition::bucket(person)].push(Click { person, cid: ids::pack(cid), ts: t, camp });
+        }
+        out
+    })
 }

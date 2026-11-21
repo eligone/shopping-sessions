@@ -6,7 +6,6 @@
 use crate::events::{Ev, PURCHASE};
 use crate::ids::Key;
 use crate::ts::MS_PER_DAY;
-use rayon::prelude::*;
 
 const GAP: i64 = 30 * 60 * 1000;
 
@@ -18,6 +17,7 @@ pub struct Session {
     pub purchase: bool,
 }
 
+#[derive(Clone, Copy)]
 pub struct UserDay {
     pub person: Key,
     pub day: i32,
@@ -25,42 +25,6 @@ pub struct UserDay {
     pub events: u64,
     pub revenue: u64,
     pub top: Option<u16>,
-}
-
-/// Split `v` (sorted by person) into about `parts` ranges, never splitting a person.
-pub fn person_ranges<T>(v: &[T], parts: usize, person: impl Fn(&T) -> Key) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    let step = v.len() / parts.max(1) + 1;
-    let mut start = 0;
-    while start < v.len() {
-        let mut end = (start + step).min(v.len());
-        while end < v.len() && person(&v[end]) == person(&v[end - 1]) {
-            end += 1;
-        }
-        out.push((start, end));
-        start = end;
-    }
-    out
-}
-
-pub fn build(mut ev: Vec<Ev>, ncat: usize, threads: usize) -> (Vec<Session>, Vec<UserDay>) {
-    let t0 = std::time::Instant::now();
-    ev.par_sort_unstable_by(|a, b| a.person.cmp(&b.person).then(a.ts.cmp(&b.ts)));
-    eprintln!("    sessions sort  {:.3}s", t0.elapsed().as_secs_f64());
-    let t1 = std::time::Instant::now();
-    let ranges = person_ranges(&ev, threads * 16, |e| e.person);
-    let parts: Vec<(Vec<Session>, Vec<UserDay>)> = ranges
-        .par_iter()
-        .map(|&(s, e)| scan(&ev[s..e], ncat))
-        .collect();
-    let mut sessions = Vec::with_capacity(parts.iter().map(|p| p.0.len()).sum());
-    let mut days = Vec::with_capacity(parts.iter().map(|p| p.1.len()).sum());
-    for (s, d) in parts {
-        sessions.extend(s);
-        days.extend(d);
-    }
-    eprintln!("    sessions scan  {:.3}s", t1.elapsed().as_secs_f64());
-    (sessions, days)
 }
 
 struct DayAcc {
@@ -105,7 +69,8 @@ impl DayAcc {
     }
 }
 
-fn scan(ev: &[Ev], ncat: usize) -> (Vec<Session>, Vec<UserDay>) {
+/// Sessions and person-days of events sorted by (person, ts).
+pub fn scan(ev: &[Ev], ncat: usize) -> (Vec<Session>, Vec<UserDay>) {
     let mut sessions = Vec::with_capacity(ev.len() / 4 + 1);
     let mut days = Vec::with_capacity(ev.len() / 6 + 1);
     let mut acc = DayAcc {

@@ -13,6 +13,7 @@ mod input;
 mod links;
 mod output;
 mod par;
+mod partition;
 mod sessions;
 mod ts;
 
@@ -138,14 +139,15 @@ fn main() {
     let (ev, ck) = rayon::join(|| events::load(&ev_src, &ctx, &persons), || clicks::load(&ck_src, &ctx, &persons));
     lap("events + clicks");
 
-    let (sessions, user_days) = sessions::build(ev, ctx.categories.len(), threads);
-    lap("sessions");
-
     let first_day = ctx.window_start.div_euclid(ts::MS_PER_DAY);
     let ndays = ((ctx.window_end - 1).div_euclid(ts::MS_PER_DAY) - first_day + 1) as usize;
     let ncamp = ctx.campaign_names.len();
-    let cd = attribution::compute(&sessions, &ck, ncamp, first_day, ndays, threads);
-    lap("attribution");
+    let totals = partition::run(&ev, &ck, ctx.categories.len(), ncamp, first_day, ndays);
+    drop((ev, ck));
+    let cd = totals.cd;
+    let n_sessions = totals.sessions;
+    let user_days = par::par_concat(totals.days);
+    lap("partitions: sort, sessions, attribution");
 
     let ud_dir = out.join("user_daily");
     let cd_dir = out.join("campaign_daily");
@@ -194,5 +196,5 @@ fn main() {
     let cols = vec![Col::Str(cid), Col::Str(ch), Col::Date(day), Col::I64(s), Col::I64(p), Col::I64(r), Col::I64(a)];
     output::write(&cd_dir.join("part-0.parquet"), output::CAMPAIGN_DAILY, cols).expect("write campaign_daily");
     lap("output campaign_daily");
-    eprintln!("[{:>8.3}s] TOTAL ({} sessions, {} user-days)", t0.elapsed().as_secs_f64(), sessions.len(), user_days.len());
+    eprintln!("[{:>8.3}s] TOTAL ({} sessions, {} user-days)", t0.elapsed().as_secs_f64(), n_sessions, user_days.len());
 }

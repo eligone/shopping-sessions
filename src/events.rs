@@ -11,8 +11,7 @@ pub const VIEW: u8 = 1;
 pub const CART: u8 = 2;
 pub const PURCHASE: u8 = 3;
 
-const BUCKET_BITS: u32 = 6;
-const BUCKETS: usize = 1 << BUCKET_BITS;
+const BUCKETS: usize = crate::partition::PARTS;
 const BAD_TS: i64 = i64::MIN;
 const NO_PRODUCT: u16 = u16::MAX;
 const MAX_PRICE: u32 = 10_000_000;
@@ -120,21 +119,22 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
             etype,
             valid,
         };
-        b[(ids::mix(eid) >> (64 - BUCKET_BITS)) as usize].push(r);
+        b[crate::partition::bucket(eid)].push(r);
     }
     b
 }
 
-/// Parse, dedup, validate. Returns surviving events in arbitrary order.
-pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Ev> {
+/// Parse, dedup, validate, and route each surviving event to its person partition.
+/// Returns `routed[eid_bucket][person_partition]`.
+pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Vec<Vec<Ev>>> {
     let t0 = std::time::Instant::now();
     let parsed: Vec<Vec<Vec<RawEv>>> = src.par_map(|c| parse_chunk(c, ctx));
     eprintln!("    events parse   {:.3}s", t0.elapsed().as_secs_f64());
     let t1 = std::time::Instant::now();
+    let parts = crate::partition::PARTS;
 
-    // Dedup per bucket without copying records: remember WHERE each event's best
-    // copy is, as (chunk << 32 | position), then keep only the valid winners.
-    let winners: Vec<Vec<u64>> = (0..BUCKETS)
+    // Per eid bucket: dedup by location (ADR-015), then route the valid winners.
+    let routed: Vec<Vec<Vec<Ev>>> = (0..BUCKETS)
         .into_par_iter()
         .map(|bi| {
             let n: usize = parsed.iter().map(|p| p[bi].len()).sum();
@@ -157,42 +157,25 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
                 .filter(|&loc| parsed[(loc >> 32) as usize][bi][(loc & 0xFFFF_FFFF) as usize].valid)
                 .collect();
             w.sort_unstable(); // read the winners back in memory order
-            w
-        })
-        .collect();
-    eprintln!("    events dedup   {:.3}s", t1.elapsed().as_secs_f64());
-    let t2 = std::time::Instant::now();
-
-    // One output vector, sized exactly; each bucket fills its own slice in parallel.
-    let total: usize = winners.iter().map(|w| w.len()).sum();
-    let mut out: Vec<Ev> = Vec::with_capacity(total);
-    {
-        let spare = &mut out.spare_capacity_mut()[..total];
-        let mut slices = Vec::with_capacity(BUCKETS);
-        let mut rest = spare;
-        for w in &winners {
-            let (head, tail) = rest.split_at_mut(w.len());
-            slices.push(head);
-            rest = tail;
-        }
-        slices.into_par_iter().zip(winners.par_iter()).enumerate().for_each(|(bi, (slot, w))| {
-            for (dst, &loc) in slot.iter_mut().zip(w) {
+            let est = w.len() / parts * 5 / 4 + 4;
+            let mut out: Vec<Vec<Ev>> = (0..parts).map(|_| Vec::with_capacity(est)).collect();
+            for &loc in &w {
                 let r = &parsed[(loc >> 32) as usize][bi][(loc & 0xFFFF_FFFF) as usize];
                 let user = join(r.user);
-                dst.write(Ev {
-                    person: persons.get(&user).copied().unwrap_or(user),
+                let person = persons.get(&user).copied().unwrap_or(user);
+                out[crate::partition::bucket(person)].push(Ev {
+                    person,
                     ts: r.ts,
                     price: r.price,
                     cat: r.cat,
                     etype: r.etype,
                 });
             }
-        });
-    }
-    // SAFETY: every one of the first `total` slots was written above.
-    unsafe { out.set_len(total) };
-    eprintln!("    events build   {:.3}s", t2.elapsed().as_secs_f64());
-    out
+            out
+        })
+        .collect();
+    eprintln!("    events dedup+route {:.3}s", t1.elapsed().as_secs_f64());
+    routed
 }
 
 #[cfg(test)]
@@ -255,7 +238,7 @@ pub fn parse_bench(src: &crate::input::Source, ctx: &Ctx) {
                     if v == 4 {
                         continue;
                     }
-                    acc = acc.wrapping_add(ids::mix(eid) >> (64 - BUCKET_BITS));
+                    acc = acc.wrapping_add(crate::partition::bucket(eid) as u64);
                 }
                 black_box(acc)
             });

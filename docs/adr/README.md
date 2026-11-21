@@ -89,3 +89,5 @@ One line per commit, newest last.
 - 2026-11-21: Fixed check.sh hiding failures behind pipes, and the mutation script leaving a stale build;
   full check passes on `edff39d`'s code.
 - 2026-11-21: `1f93dbc` scored 3.80 s (best). Leaderboard top is 0.28 s.
+- 2026-11-21: Branch `partitioned`: 256 eid buckets -> 256 person partitions; per-partition sort, sessions,
+  attribution (no global sort). Buckets from the middle of the hash. All checks pass.
