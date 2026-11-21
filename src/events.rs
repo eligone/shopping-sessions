@@ -148,24 +148,38 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
                     });
                 }
             }
-            let mut w: Vec<u64> = best
-                .values()
-                .filter(|&loc| parsed[(loc >> 32) as usize][bi][(loc & 0xFFFF_FFFF) as usize].valid)
-                .collect();
-            w.sort_unstable(); // read the winners back in memory order
-            let est = w.len() / parts * 5 / 4 + 4;
+            // Mark each event's winning copy with one bit (ADR-027), indexed by its
+            // position in this bucket's records across all chunks, then read the
+            // records in their natural order: no random reads, no sort.
+            let mut first = Vec::with_capacity(parsed.len() + 1); // first[ci] = index of chunk ci's first record
+            let mut acc = 0usize;
+            for p in &parsed {
+                first.push(acc);
+                acc += p[bi].len();
+            }
+            let mut win = vec![0u64; n / 64 + 1];
+            for loc in best.values() {
+                let i = first[(loc >> 32) as usize] + (loc & 0xFFFF_FFFF) as usize;
+                win[i / 64] |= 1 << (i % 64);
+            }
+            let est = best.len() / parts * 5 / 4 + 4;
             let mut out: Vec<Vec<Ev>> = (0..parts).map(|_| Vec::with_capacity(est)).collect();
-            for &loc in &w {
-                let r = &parsed[(loc >> 32) as usize][bi][(loc & 0xFFFF_FFFF) as usize];
-                let user = r.user;
-                let person = persons.get(user).unwrap_or(user);
-                out[crate::partition::bucket(person)].push(Ev {
-                    person,
-                    ts: (r.ts - ws) as u32,
-                    price: r.price,
-                    cat: r.cat,
-                    etype: r.etype,
-                });
+            let mut i = 0usize;
+            for p in &parsed {
+                for r in &p[bi] {
+                    if win[i / 64] >> (i % 64) & 1 == 1 && r.valid {
+                        let user = r.user;
+                        let person = persons.get(user).unwrap_or(user);
+                        out[crate::partition::bucket(person)].push(Ev {
+                            person,
+                            ts: (r.ts - ws) as u32,
+                            price: r.price,
+                            cat: r.cat,
+                            etype: r.etype,
+                        });
+                    }
+                    i += 1;
+                }
             }
             out
         })

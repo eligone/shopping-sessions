@@ -75,7 +75,6 @@ impl<V: Copy + Default> FlatMap<V> {
         self.len > before
     }
 
-    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.len
     }

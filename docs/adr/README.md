@@ -31,6 +31,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [024](024-chunk-scanner.md) | One-pass chunk scanner with 64-byte bitmasks (AVX2 on x86) | Accepted (branch `partitioned`) |
 | [025](025-flat-hash-table.md) | Flat open-addressing table for dedup, products, campaigns and persons | Accepted (branch `partitioned`) |
 | [026](026-links-alongside-parse.md) | Resolve links while events are parsed | Accepted (branch `partitioned`) |
+| [027](027-winner-bitset.md) | Mark dedup winners in a bitset instead of sorting their locations | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -131,3 +132,4 @@ One line per commit, newest last.
   Second rules audit (changes since 60c7ade): no issues. Scout reassessment: next are links in parallel, a winners
   bitset, paired FlatMap + prefetch, and a per-partition counting sort.
 - 2026-11-21: ADR-026: links run alongside events parse (events::parse / events::dedup_route split).
+- 2026-11-21: ADR-027: dedup winners marked in a bitset; records read in order (no 20M-location sort).
