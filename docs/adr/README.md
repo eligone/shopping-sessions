@@ -44,6 +44,8 @@ Score is run time from container start to exit, lower is better.
   Saved on branch `option-1`.
 - **Fourth submission (`3b5c1d3`, Rust + pread, option B): scored 4.05 s**, a tie with A within
   scorer noise (about 20%). Reading mode is not the bottleneck on the scorer.
+- **Fifth submission (`1f93dbc`, ADR-015/016/018): scored 3.80 s**, best so far. The leaderboard top is
+  0.28 s.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -86,3 +88,4 @@ One line per commit, newest last.
 - 2026-11-21: ADR-019: `scripts/mutation_test.py`; 12/15 caught, the 3 survivors are equivalent mutants.
 - 2026-11-21: Fixed check.sh hiding failures behind pipes, and the mutation script leaving a stale build;
   full check passes on `edff39d`'s code.
+- 2026-11-21: `1f93dbc` scored 3.80 s (best). Leaderboard top is 0.28 s.
