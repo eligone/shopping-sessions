@@ -2,7 +2,8 @@
 //! -> validate -> drop late -> compact records keyed by person.
 
 use crate::csv;
-use crate::ids::{self, Key, KeyMap};
+use crate::ids::{self, Key};
+use crate::table::FlatMap;
 use crate::ts;
 use crate::Ctx;
 use rayon::prelude::*;
@@ -112,7 +113,7 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
 
 /// Parse, dedup, validate, and route each surviving event to its person partition.
 /// Returns `routed[eid_bucket][person_partition]`.
-pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Vec<Vec<Ev>>> {
+pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec<Vec<Ev>>> {
     let t0 = std::time::Instant::now();
     let parsed: Vec<Vec<Vec<RawEv>>> = src.par_map(|c| parse_chunk(c, ctx));
     eprintln!("    events parse   {:.3}s", t0.elapsed().as_secs_f64());
@@ -125,22 +126,20 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
         .into_par_iter()
         .map(|bi| {
             let n: usize = parsed.iter().map(|p| p[bi].len()).sum();
-            let mut best: KeyMap<u64> = ids::key_map(n);
+            let mut best: FlatMap<u64> = FlatMap::with_capacity(n);
             for (ci, p) in parsed.iter().enumerate() {
                 for (pos, r) in p[bi].iter().enumerate() {
                     let here = (ci as u64) << 32 | pos as u64;
-                    best.entry(r.eid)
-                        .and_modify(|loc| {
-                            let cur = &parsed[(*loc >> 32) as usize][bi][(*loc & 0xFFFF_FFFF) as usize];
-                            if r.ingest < cur.ingest {
-                                *loc = here;
-                            }
-                        })
-                        .or_insert(here);
+                    best.upsert(r.eid, here, |loc| {
+                        let cur = &parsed[(*loc >> 32) as usize][bi][(*loc & 0xFFFF_FFFF) as usize];
+                        if r.ingest < cur.ingest {
+                            *loc = here;
+                        }
+                    });
                 }
             }
             let mut w: Vec<u64> = best
-                .into_values()
+                .values()
                 .filter(|&loc| parsed[(loc >> 32) as usize][bi][(loc & 0xFFFF_FFFF) as usize].valid)
                 .collect();
             w.sort_unstable(); // read the winners back in memory order
@@ -149,7 +148,7 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
             for &loc in &w {
                 let r = &parsed[(loc >> 32) as usize][bi][(loc & 0xFFFF_FFFF) as usize];
                 let user = r.user;
-                let person = persons.get(&user).copied().unwrap_or(user);
+                let person = persons.get(user).unwrap_or(user);
                 out[crate::partition::bucket(person)].push(Ev {
                     person,
                     ts: (r.ts - ws) as u32,

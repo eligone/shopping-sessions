@@ -29,6 +29,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [022](022-huge-pages.md) | Ask mimalloc for huge OS pages (`MIMALLOC_ALLOW_LARGE_OS_PAGES=1`) | Accepted (branch `partitioned`); to be scored |
 | [023](023-u64-ids-u32-times.md) | 64-bit base-37 IDs and 32-bit event times | Accepted (branch `partitioned`) |
 | [024](024-chunk-scanner.md) | One-pass chunk scanner with 64-byte bitmasks (AVX2 on x86) | Accepted (branch `partitioned`) |
+| [025](025-flat-hash-table.md) | Flat open-addressing table for dedup, products, campaigns and persons | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -122,3 +123,4 @@ One line per commit, newest last.
   check.sh builds with -j 2 to stay light on the laptop.
 - 2026-11-21: ADR-024: one-pass chunk scanner (AVX2 masks on x86) for events, clicks, links; fuzz-tested.
 - 2026-11-21: `55032eb` scored 2.67 s (12% better than 3.02 s); main moves to it, 3.02 s saved as `scored-3.02`.
+- 2026-11-21: ADR-025: `src/table.rs` FlatMap for dedup, products, campaigns, persons; fuzz-tested against HashMap.

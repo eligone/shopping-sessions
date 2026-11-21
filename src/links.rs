@@ -4,9 +4,10 @@
 
 use crate::csv;
 use crate::ids::{self, Key, KeyMap};
+use crate::table::FlatMap;
 
 /// Map from every linked ID to its person's name. IDs not in the map are their own person.
-pub fn persons(src: &crate::input::Source) -> KeyMap<Key> {
+pub fn persons(src: &crate::input::Source) -> FlatMap<Key> {
     let t0 = std::time::Instant::now();
     let edges: Vec<(Key, Key)> = src
         .par_map(|c| {
@@ -68,9 +69,9 @@ pub fn persons(src: &crate::input::Source) -> KeyMap<Key> {
             has[r] = true;
         }
     }
-    let mut out: KeyMap<Key> = ids::key_map(n);
+    let mut out: FlatMap<Key> = FlatMap::with_capacity(n);
     for i in 0..n {
-        out.insert(keys[i], name[root[i] as usize]);
+        out.insert_new(keys[i], name[root[i] as usize]);
     }
     eprintln!("    links dsu+map  {:.3}s ({} ids)", t1.elapsed().as_secs_f64(), n);
     out

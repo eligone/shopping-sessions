@@ -4,7 +4,8 @@
 //! the same result as the rules' order, and after sorting the copies are adjacent.
 
 use crate::csv;
-use crate::ids::{self, Key, KeyMap};
+use crate::ids::{self, Key};
+use crate::table::FlatMap;
 use crate::ts;
 use crate::Ctx;
 
@@ -19,7 +20,7 @@ pub struct Click {
 /// Parse and validate clicks, routed by person partition: `routed[chunk][partition]`.
 /// Copies of a click are identical, so they land in the same partition, where
 /// sorting makes them adjacent and dedup drops all but one.
-pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Vec<Vec<Click>>> {
+pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec<Vec<Click>>> {
     let lo = ctx.window_start - 7 * ts::MS_PER_DAY;
     let hi = ctx.window_end;
     let parts = crate::partition::PARTS;
@@ -36,7 +37,7 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
                 return;
             }
             let user = ids::pack(user);
-            let person = persons.get(&user).copied().unwrap_or(user);
+            let person = persons.get(user).unwrap_or(user);
             out[crate::partition::bucket(person)].push(Click { person, cid: ids::pack(cid), ts: t, camp });
         });
         out

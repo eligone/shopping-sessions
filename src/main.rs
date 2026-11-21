@@ -14,10 +14,11 @@ mod links;
 mod output;
 mod par;
 mod partition;
+mod table;
 mod sessions;
 mod ts;
 
-use ids::KeyMap;
+use table::FlatMap;
 use output::Col;
 use parquet::data_type::ByteArray;
 use rayon::prelude::*;
@@ -50,11 +51,11 @@ impl<K: Hash + Eq, V, S: std::hash::BuildHasher> InsertNew<K, V> for HashMap<K, 
 pub struct Ctx {
     pub window_start: i64,
     pub window_end: i64,
-    products: KeyMap<u16>,                        // base-37 encodable IDs
+    products: FlatMap<u16>,                       // base-37 encodable IDs
     products_other: HashMap<Vec<u8>, u16>,        // any other ID, by bytes
     unknown_cat: u16,
     categories: Vec<Vec<u8>>, // id -> name, ids in byte-wise name order
-    campaigns: KeyMap<u16>,
+    campaigns: FlatMap<u16>,
     campaigns_other: HashMap<Vec<u8>, u16>,
     campaign_names: Vec<Vec<u8>>,
     channels: Vec<Vec<u8>>,
@@ -66,19 +67,17 @@ impl Ctx {
     /// an ID that is not base-37 encodable is looked up by its bytes.
     pub fn category_of(&self, product: &[u8]) -> u16 {
         match ids::try_encode(product) {
-            Some(k) => self.products.get(&k),
-            None => self.products_other.get(product),
+            Some(k) => self.products.get(k),
+            None => self.products_other.get(product).copied(),
         }
-        .copied()
         .unwrap_or(self.unknown_cat)
     }
     #[inline]
     pub fn campaign_of(&self, campaign: &[u8]) -> Option<u16> {
         match ids::try_encode(campaign) {
-            Some(k) => self.campaigns.get(&k),
-            None => self.campaigns_other.get(campaign),
+            Some(k) => self.campaigns.get(k),
+            None => self.campaigns_other.get(campaign).copied(),
         }
-        .copied()
     }
 }
 
@@ -116,12 +115,12 @@ fn build_ctx(data: &Path) -> Ctx {
     names.sort();
     names.dedup();
     let cat_id = |n: &[u8]| names.binary_search_by(|x| x.as_slice().cmp(n)).unwrap() as u16;
-    let mut products = ids::key_map(prows.len());
+    let mut products = FlatMap::with_capacity(prows.len());
     let mut products_other = HashMap::new();
     for (p, c) in &prows {
         match ids::try_encode(p) {
             Some(k) => {
-                products.entry(k).or_insert(cat_id(c));
+                products.insert_new(k, cat_id(c));
             }
             None => {
                 products_other.entry(p.clone()).or_insert(cat_id(c));
@@ -131,14 +130,14 @@ fn build_ctx(data: &Path) -> Ctx {
     let unknown_cat = cat_id(b"unknown");
 
     let crows = two_col_rows(&data.join("campaigns.csv"));
-    let mut campaigns = ids::key_map(crows.len());
+    let mut campaigns = FlatMap::with_capacity(crows.len());
     let mut campaigns_other: HashMap<Vec<u8>, u16> = HashMap::new();
     let mut campaign_names = Vec::new();
     let mut channels = Vec::new();
     for (c, ch) in crows {
         let id = campaign_names.len() as u16;
         let fresh = match ids::try_encode(&c) {
-            Some(k) => campaigns.try_insert_new(k, id),
+            Some(k) => campaigns.insert_new(k, id),
             None => campaigns_other.try_insert_new(c.clone(), id),
         };
         if !fresh {
