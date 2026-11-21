@@ -128,6 +128,10 @@ fn main() {
     );
     lap(if mode == input::Mode::Mmap { "open (mmap)" } else { "open (pread)" });
 
+    if std::env::var("SS_STAGE").as_deref() == Ok("parsebench") {
+        events::parse_bench(&ev_src, &ctx);
+        return;
+    }
     let persons = links::persons(&ln_src);
     lap("links");
 

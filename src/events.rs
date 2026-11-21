@@ -204,3 +204,64 @@ mod tests {
         assert_eq!(std::mem::size_of::<super::Ev>(), 32);
     }
 }
+
+/// Development benchmark (`SS_STAGE=parsebench`): time the events parse loop with
+/// one more piece of work per variant, to see what each piece costs (ADR-017).
+pub fn parse_bench(src: &crate::input::Source, ctx: &Ctx) {
+    use std::hint::black_box;
+    let bytes: u64 = src.par_map(|c| c.len() as u64).iter().sum();
+    let variants: [(&str, u8); 6] = [
+        ("1 split lines only", 1),
+        ("2 + split fields (csv::fields)", 2),
+        ("3 + parse ts, ingest, price, type", 3),
+        ("4 + pack IDs, product lookup", 4),
+        ("5 + mix hash (bucket choice)", 5),
+        ("6 full parse_chunk (+ bucket push)", 6),
+    ];
+    for round in 0..3 {
+        for &(name, v) in &variants {
+            let t = std::time::Instant::now();
+            let sums: Vec<u64> = src.par_map(|chunk| {
+                if v == 6 {
+                    let b = parse_chunk(chunk, ctx);
+                    return b.iter().map(|x| x.len() as u64).sum();
+                }
+                let mut acc = 0u64;
+                for line in csv::lines(chunk) {
+                    if v == 1 {
+                        acc = acc.wrapping_add(line.len() as u64);
+                        continue;
+                    }
+                    let mut f = [None; 7];
+                    if !csv::fields::<7>(line, &mut f) {
+                        continue;
+                    }
+                    if v == 2 {
+                        acc = acc.wrapping_add(f[0].map_or(0, |x| x.len()) as u64);
+                        continue;
+                    }
+                    let etype = event_type(f[4]);
+                    let ts = f[2].and_then(ts::parse_ts).unwrap_or(BAD_TS);
+                    let ingest = f[3].map_or(i64::MAX, ts::parse_ingest);
+                    let price = if etype == PURCHASE { parse_price(f[6]) } else { 0 };
+                    acc = acc.wrapping_add(ts as u64 ^ ingest as u64 ^ price as u64 ^ etype as u64);
+                    if v == 3 {
+                        continue;
+                    }
+                    let eid = f[0].map_or(0, ids::pack);
+                    let user = f[1].map_or(0, ids::pack);
+                    let cat = f[5].map_or(NO_PRODUCT, |p| ctx.category_of(ids::pack(p)));
+                    acc = acc.wrapping_add(eid as u64 ^ user as u64 ^ cat as u64);
+                    if v == 4 {
+                        continue;
+                    }
+                    acc = acc.wrapping_add(ids::mix(eid) >> (64 - BUCKET_BITS));
+                }
+                black_box(acc)
+            });
+            black_box(sums);
+            let s = t.elapsed().as_secs_f64();
+            eprintln!("round {round}  {name:<38} {:6.3}s  {:5.2} GB/s", s, bytes as f64 / s / 1e9);
+        }
+    }
+}

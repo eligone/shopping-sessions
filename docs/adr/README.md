@@ -21,6 +21,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [014](014-pread-read-mode.md) | Parallel `pread` read mode, selectable against mmap | Accepted (branch `rust`) |
 | [015](015-fewer-event-copies.md) | Fewer copies of each event: validate at parse, dedup by location, fill one output | Accepted (branch `rust`) |
 | [016](016-parallel-concat.md) | Parallel concat for per-task results (clicks) | Accepted (branch `rust`); unproven locally |
+| [017](017-parse-ablation.md) | Measure the events parse by ablation before optimizing it | Accepted (branch `rust`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -76,3 +77,5 @@ One line per commit, newest last.
   Dedup about 40% faster, about 25% fewer page reclaims at 10M.
 - 2026-11-21: ADR-016: `src/par.rs` `par_concat`, used by clicks. No measurable local change: the laptop's
   memory pressure (6 GB swap) now exceeds the effects, so the scorer measures from here.
+- 2026-11-21: ADR-017: `SS_STAGE=parsebench` ablation. Field splitting is 35% of parse (the largest
+  single cost); expected gain from SIMD about 25% of parse, about 8% of the run.
