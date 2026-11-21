@@ -2,6 +2,7 @@ dev/
 dev*/
 out/
 out*/
+target/
 __pycache__/
 *.pyc
 .venv/

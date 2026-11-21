@@ -1,0 +1,23 @@
+[package]
+name = "shopping-sessions"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[[bin]]
+name = "shopping-sessions"
+path = "src/main.rs"
+
+[dependencies]
+rayon = "=1.10.0"
+memmap2 = "=0.9.5"
+ahash = { version = "=0.8.11", default-features = false, features = ["std", "runtime-rng"] }
+parquet = { version = "=55.2.0", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false

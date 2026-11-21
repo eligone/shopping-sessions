@@ -1,5 +1,9 @@
 fixtures/
-dev/
-out/
+dev*/
+out*/
+target/
+pipeline/
+scripts/
+docs/
 *.md
 .git

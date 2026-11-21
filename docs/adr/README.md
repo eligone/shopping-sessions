@@ -16,6 +16,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [009](009-assists-session-ranges.md) | Assists via merged click intervals and ASOF-found session ranges | Accepted |
 | [010](010-verification-and-safe-local-runs.md) | Verify against fixtures, the dev answer and repeat runs; keep runs safe on small machines | Accepted |
 | [011](011-commit-conventions.md) | Commit conventions: no AI co-authors, ADRs updated with every commit | Accepted |
+| [012](012-rust-rewrite.md) | Rewrite the pipeline in Rust, with integer IDs and one parse pass | Accepted (branch `rust`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -37,4 +38,6 @@ Score is run time from container start to exit, lower is better.
   timing: about 7 s for 5M events on 4 laptop cores.
 - **Next speed candidates:** the `ev` stage (validation and joins, about 2.7 s at 5M), and keeping
   string IDs out of the large sorts.
-- **Docker image not yet built locally** with the added SciPy dependency.
+- **Rust branch (`rust`):** 36/36 fixtures, dev set MATCH, identical to DuckDB on seeds 2-10 and 5M;
+  0.24 s on the dev set, 1.34 s on 5M (4 laptop threads). Not yet submitted.
+- **Docker image not yet built locally** (Docker Desktop was not running).
