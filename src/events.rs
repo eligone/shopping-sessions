@@ -99,9 +99,9 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
 }
 
 /// Parse, dedup, validate. Returns surviving events in arbitrary order.
-pub fn load(chunks: &[&[u8]], ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Ev> {
+pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Ev> {
     let t0 = std::time::Instant::now();
-    let parsed: Vec<Vec<Vec<RawEv>>> = chunks.par_iter().map(|c| parse_chunk(c, ctx)).collect();
+    let parsed: Vec<Vec<Vec<RawEv>>> = src.par_map(|c| parse_chunk(c, ctx));
     eprintln!("    events parse   {:.3}s", t0.elapsed().as_secs_f64()); let t1 = std::time::Instant::now();
     let (ws, we) = (ctx.window_start, ctx.window_end);
 

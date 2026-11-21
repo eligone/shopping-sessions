@@ -119,18 +119,18 @@ fn main() {
     let ctx = build_ctx(&data);
     lap("manifest, products, campaigns");
 
-    let (ev_files, ck_files, ln_files) = (
-        input::Files::open(&input::csv_files(&data.join("events"))),
-        input::Files::open(&input::csv_files(&data.join("clicks"))),
-        input::Files::open(&input::csv_files(&data.join("links"))),
+    let mode = input::Mode::from_env();
+    let (ev_src, ck_src, ln_src) = (
+        input::Source::open(&input::csv_files(&data.join("events")), mode),
+        input::Source::open(&input::csv_files(&data.join("clicks")), mode),
+        input::Source::open(&input::csv_files(&data.join("links")), mode),
     );
-    let (ev_chunks, ck_chunks, ln_chunks) = (ev_files.chunks(), ck_files.chunks(), ln_files.chunks());
-    lap("mmap");
+    lap(if mode == input::Mode::Mmap { "open (mmap)" } else { "open (pread)" });
 
-    let persons = links::persons(&ln_chunks);
+    let persons = links::persons(&ln_src);
     lap("links");
 
-    let (ev, ck) = rayon::join(|| events::load(&ev_chunks, &ctx, &persons), || clicks::load(&ck_chunks, &ctx, &persons));
+    let (ev, ck) = rayon::join(|| events::load(&ev_src, &ctx, &persons), || clicks::load(&ck_src, &ctx, &persons));
     lap("events + clicks");
 
     let (sessions, user_days) = sessions::build(ev, ctx.categories.len(), threads);

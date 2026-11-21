@@ -55,3 +55,5 @@ One line per commit, newest last.
   file cache explains half the 5M time (1.35 s cold, 0.70 s warm). CLAUDE.md: commit often.
 - 2026-11-21: Read-ahead hints on all input files, events and clicks concurrent again (ADR-013).
   Rust merged into `main` for submission.
+- 2026-11-21: Option B in progress: `pread` read mode (default) next to `mmap` (`SS_READ=mmap`);
+  line-ownership boundary test for every chunk size. Fixtures and dev MATCH in both modes.

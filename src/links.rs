@@ -4,13 +4,11 @@
 
 use crate::csv;
 use crate::ids::{self, Key, KeyMap};
-use rayon::prelude::*;
 
 /// Map from every linked ID to its person's name. IDs not in the map are their own person.
-pub fn persons(chunks: &[&[u8]]) -> KeyMap<Key> {
-    let edges: Vec<(Key, Key)> = chunks
-        .par_iter()
-        .flat_map_iter(|c| {
+pub fn persons(src: &crate::input::Source) -> KeyMap<Key> {
+    let edges: Vec<(Key, Key)> = src
+        .par_map(|c| {
             let mut v = Vec::new();
             for line in csv::lines(c) {
                 let mut f = [None; 2];
@@ -23,6 +21,8 @@ pub fn persons(chunks: &[&[u8]]) -> KeyMap<Key> {
             }
             v
         })
+        .into_iter()
+        .flatten()
         .collect();
 
     // Intern the linked IDs.
