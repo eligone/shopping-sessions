@@ -65,7 +65,9 @@ Score is run time from container start to exit, lower is better.
 - **Fifth submission (`1f93dbc`, ADR-015/016/018): scored 3.80 s.** The leaderboard top is 0.28 s.
 - **Sixth submission (`da351f1`, partitioned pipeline + mimalloc, ADR-020): scored 3.02 s.**
 - **Seventh submission (`55032eb`, huge pages + u64 IDs + chunk scanner, ADR-022/023/024): scored 2.67 s**,
-  best so far. It also confirms the AVX2 path builds and is correct on the scorer.
+  It also confirms the AVX2 path builds and is correct on the scorer.
+- **Eighth submission (`c203fa6`, FlatMap, ADR-025): scored 2.45 s**, best so far. Reviewed by the rules
+  auditor first (no issues).
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -124,3 +126,6 @@ One line per commit, newest last.
 - 2026-11-21: ADR-024: one-pass chunk scanner (AVX2 masks on x86) for events, clicks, links; fuzz-tested.
 - 2026-11-21: `55032eb` scored 2.67 s (12% better than 3.02 s); main moves to it, 3.02 s saved as `scored-3.02`.
 - 2026-11-21: ADR-025: `src/table.rs` FlatMap for dedup, products, campaigns, persons; fuzz-tested against HashMap.
+- 2026-11-21: `c203fa6` (FlatMap) scored 2.45 s, 8% better than 2.67 s; main moves to it, 2.67 s saved as `scored-2.67`.
+  Second rules audit (changes since 60c7ade): no issues. Scout reassessment: next are links in parallel, a winners
+  bitset, paired FlatMap + prefetch, and a per-partition counting sort.

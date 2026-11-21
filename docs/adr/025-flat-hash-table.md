@@ -25,3 +25,5 @@ The links interning map and the byte-keyed maps for escaped IDs stay as `HashMap
 - Mutation check: a lookup that stops at the first occupied slot makes the test fail.
 - `scripts/check.sh`: 12/12 unit tests, fixtures in both modes, dev MATCH, seeds 2–3 MATCH.
 - Not benchmarked locally; the scorer measures.
+
+**Scored result.** `c203fa6` scored **2.45 s**, against 2.67 s for `55032eb` (−8%), as a single-change A/B.
