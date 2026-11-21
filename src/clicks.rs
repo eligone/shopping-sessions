@@ -20,6 +20,7 @@ pub struct Click {
 pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Click> {
     let lo = ctx.window_start - 7 * ts::MS_PER_DAY;
     let hi = ctx.window_end;
+    let t0 = std::time::Instant::now();
     let parts: Vec<Vec<Click>> = src.par_map(|c| {
             let mut out = Vec::with_capacity(c.len() / 45 + 16);
             for line in csv::lines(c) {
@@ -49,9 +50,12 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
     for p in parts {
         v.extend_from_slice(&p);
     }
+    eprintln!("    clicks parse   {:.3}s", t0.elapsed().as_secs_f64());
+    let t1 = std::time::Instant::now();
     v.par_sort_unstable_by(|a, b| {
         a.person.cmp(&b.person).then(a.ts.cmp(&b.ts)).then_with(|| ids::cmp_ids(a.cid, b.cid))
     });
     v.dedup_by(|b, a| a.cid == b.cid && a.person == b.person && a.ts == b.ts);
+    eprintln!("    clicks sort    {:.3}s", t1.elapsed().as_secs_f64());
     v
 }

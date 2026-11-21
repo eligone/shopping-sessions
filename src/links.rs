@@ -7,6 +7,7 @@ use crate::ids::{self, Key, KeyMap};
 
 /// Map from every linked ID to its person's name. IDs not in the map are their own person.
 pub fn persons(src: &crate::input::Source) -> KeyMap<Key> {
+    let t0 = std::time::Instant::now();
     let edges: Vec<(Key, Key)> = src
         .par_map(|c| {
             let mut v = Vec::new();
@@ -25,6 +26,8 @@ pub fn persons(src: &crate::input::Source) -> KeyMap<Key> {
         .flatten()
         .collect();
 
+    eprintln!("    links parse    {:.3}s ({} edges)", t0.elapsed().as_secs_f64(), edges.len());
+    let t1 = std::time::Instant::now();
     // Intern the linked IDs.
     let mut index: KeyMap<u32> = ids::key_map(edges.len() * 2);
     let mut keys: Vec<Key> = Vec::with_capacity(edges.len() * 2);
@@ -73,5 +76,6 @@ pub fn persons(src: &crate::input::Source) -> KeyMap<Key> {
     for i in 0..n {
         out.insert(keys[i], name[root[i] as usize]);
     }
+    eprintln!("    links dsu+map  {:.3}s ({} ids)", t1.elapsed().as_secs_f64(), n);
     out
 }

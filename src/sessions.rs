@@ -44,7 +44,10 @@ pub fn person_ranges<T>(v: &[T], parts: usize, person: impl Fn(&T) -> Key) -> Ve
 }
 
 pub fn build(mut ev: Vec<Ev>, ncat: usize, threads: usize) -> (Vec<Session>, Vec<UserDay>) {
+    let t0 = std::time::Instant::now();
     ev.par_sort_unstable_by(|a, b| a.person.cmp(&b.person).then(a.ts.cmp(&b.ts)));
+    eprintln!("    sessions sort  {:.3}s", t0.elapsed().as_secs_f64());
+    let t1 = std::time::Instant::now();
     let ranges = person_ranges(&ev, threads * 16, |e| e.person);
     let parts: Vec<(Vec<Session>, Vec<UserDay>)> = ranges
         .par_iter()
@@ -56,6 +59,7 @@ pub fn build(mut ev: Vec<Ev>, ncat: usize, threads: usize) -> (Vec<Session>, Vec
         sessions.extend(s);
         days.extend(d);
     }
+    eprintln!("    sessions scan  {:.3}s", t1.elapsed().as_secs_f64());
     (sessions, days)
 }
 

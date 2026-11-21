@@ -163,6 +163,7 @@ fn main() {
         output::write(&ud_dir.join(format!("part-{i}.parquet")), output::USER_DAILY, cols).expect("write user_daily");
     });
 
+    lap("output user_daily");
     // campaign_daily
     let (mut cid, mut ch, mut day, mut s, mut p, mut r, mut a) = (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
     for c in 0..=ncamp {
@@ -187,6 +188,6 @@ fn main() {
     }
     let cols = vec![Col::Str(cid), Col::Str(ch), Col::Date(day), Col::I64(s), Col::I64(p), Col::I64(r), Col::I64(a)];
     output::write(&cd_dir.join("part-0.parquet"), output::CAMPAIGN_DAILY, cols).expect("write campaign_daily");
-    lap("output");
+    lap("output campaign_daily");
     eprintln!("[{:>8.3}s] TOTAL ({} sessions, {} user-days)", t0.elapsed().as_secs_f64(), sessions.len(), user_days.len());
 }
