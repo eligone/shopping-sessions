@@ -32,6 +32,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [025](025-flat-hash-table.md) | Flat open-addressing table for dedup, products, campaigns and persons | Accepted (branch `partitioned`) |
 | [026](026-links-alongside-parse.md) | Resolve links while events are parsed | Accepted (branch `partitioned`) |
 | [027](027-winner-bitset.md) | Mark dedup winners in a bitset instead of sorting their locations | Accepted (branch `partitioned`) |
+| [028](028-paired-slots-prefetch.md) | FlatMap slots hold key and value together; prefetch upcoming lookups | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -133,3 +134,5 @@ One line per commit, newest last.
   bitset, paired FlatMap + prefetch, and a per-partition counting sort.
 - 2026-11-21: ADR-026: links run alongside events parse (events::parse / events::dedup_route split).
 - 2026-11-21: ADR-027: dedup winners marked in a bitset; records read in order (no 20M-location sort).
+- 2026-11-21: ADR-028: FlatMap (key, value) slots; prefetch 16 ahead in dedup and route.
+  Batch for one submission: ADR-026, 027, 028.

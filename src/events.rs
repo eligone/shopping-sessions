@@ -137,8 +137,13 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
         .map(|bi| {
             let n: usize = parsed.iter().map(|p| p[bi].len()).sum();
             let mut best: FlatMap<u64> = FlatMap::with_capacity(n);
+            const AHEAD: usize = 16; // prefetch distance, in records (ADR-028)
             for (ci, p) in parsed.iter().enumerate() {
-                for (pos, r) in p[bi].iter().enumerate() {
+                let recs = &p[bi];
+                for (pos, r) in recs.iter().enumerate() {
+                    if let Some(a) = recs.get(pos + AHEAD) {
+                        best.prefetch(a.eid);
+                    }
                     let here = (ci as u64) << 32 | pos as u64;
                     best.upsert(r.eid, here, |loc| {
                         let cur = &parsed[(*loc >> 32) as usize][bi][(*loc & 0xFFFF_FFFF) as usize];
@@ -166,7 +171,13 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
             let mut out: Vec<Vec<Ev>> = (0..parts).map(|_| Vec::with_capacity(est)).collect();
             let mut i = 0usize;
             for p in &parsed {
-                for r in &p[bi] {
+                let recs = &p[bi];
+                for (pos, r) in recs.iter().enumerate() {
+                    if let Some(a) = recs.get(pos + AHEAD) {
+                        if a.valid {
+                            persons.prefetch(a.user);
+                        }
+                    }
                     if win[i / 64] >> (i % 64) & 1 == 1 && r.valid {
                         let user = r.user;
                         let person = persons.get(user).unwrap_or(user);

@@ -1,15 +1,21 @@
 //! A small open-addressing hash table for non-zero u64 keys (ADR-025).
 //!
-//! Two flat arrays (keys, values), power-of-two capacity, linear probing, key 0
+//! One flat array of (key, value) slots, power-of-two capacity, linear probing, key 0
 //! marks an empty slot (no packed ID is ever 0). No deletion. It grows when 3/4
 //! full, so inserts always terminate. Narrower than `std::collections::HashMap`,
 //! and so simpler and more cache-friendly for our keys.
 
 use crate::ids::mix;
 
+/// One slot: the key next to its value, so a lookup touches one cache line (ADR-028).
+#[derive(Clone, Copy, Default)]
+struct Entry<V: Copy + Default> {
+    k: u64,
+    v: V,
+}
+
 pub struct FlatMap<V: Copy + Default> {
-    keys: Vec<u64>,
-    vals: Vec<V>,
+    slots: Vec<Entry<V>>,
     mask: usize,
     len: usize,
 }
@@ -17,7 +23,7 @@ pub struct FlatMap<V: Copy + Default> {
 impl<V: Copy + Default> FlatMap<V> {
     pub fn with_capacity(n: usize) -> Self {
         let cap = (n.max(8) * 2).next_power_of_two();
-        FlatMap { keys: vec![0; cap], vals: vec![V::default(); cap], mask: cap - 1, len: 0 }
+        FlatMap { slots: vec![Entry::default(); cap], mask: cap - 1, len: 0 }
     }
 
     #[inline]
@@ -27,16 +33,30 @@ impl<V: Copy + Default> FlatMap<V> {
         (mix(k) as usize) & self.mask
     }
 
+    /// Hint the CPU to start loading `k`'s first slot (ADR-028). Only a hint: it
+    /// never changes results. A no-op where no prefetch instruction is used.
+    #[inline(always)]
+    pub fn prefetch(&self, k: u64) {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use std::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
+            let p = self.slots.as_ptr().add(self.start(k)) as *const i8;
+            _mm_prefetch::<_MM_HINT_T0>(p);
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        let _ = k;
+    }
+
     #[inline]
     pub fn get(&self, k: u64) -> Option<V> {
         debug_assert!(k != 0);
         let mut i = self.start(k);
         loop {
-            let s = self.keys[i];
-            if s == k {
-                return Some(self.vals[i]);
+            let s = self.slots[i];
+            if s.k == k {
+                return Some(s.v);
             }
-            if s == 0 {
+            if s.k == 0 {
                 return None;
             }
             i = (i + 1) & self.mask;
@@ -49,16 +69,16 @@ impl<V: Copy + Default> FlatMap<V> {
         debug_assert!(k != 0);
         let mut i = self.start(k);
         loop {
-            let s = self.keys[i];
-            if s == k {
-                update(&mut self.vals[i]);
+            let s = &mut self.slots[i];
+            if s.k == k {
+                update(&mut s.v);
                 return;
             }
-            if s == 0 {
-                self.keys[i] = k;
-                self.vals[i] = v;
+            if s.k == 0 {
+                s.k = k;
+                s.v = v;
                 self.len += 1;
-                if self.len * 4 > self.keys.len() * 3 {
+                if self.len * 4 > self.slots.len() * 3 {
                     self.grow();
                 }
                 return;
@@ -81,15 +101,15 @@ impl<V: Copy + Default> FlatMap<V> {
 
     /// Values of all entries, in slot order.
     pub fn values(&self) -> impl Iterator<Item = V> + '_ {
-        self.keys.iter().zip(&self.vals).filter(|(k, _)| **k != 0).map(|(_, v)| *v)
+        self.slots.iter().filter(|s| s.k != 0).map(|s| s.v)
     }
 
     #[cold]
     fn grow(&mut self) {
-        let mut bigger = FlatMap::with_capacity(self.keys.len());
-        for (&k, &v) in self.keys.iter().zip(&self.vals) {
-            if k != 0 {
-                bigger.upsert(k, v, |_| {});
+        let mut bigger = FlatMap::with_capacity(self.slots.len());
+        for s in &self.slots {
+            if s.k != 0 {
+                bigger.upsert(s.k, s.v, |_| {});
             }
         }
         *self = bigger;
