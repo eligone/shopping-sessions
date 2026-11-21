@@ -25,6 +25,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [018](018-bitmask-field-splitting.md) | Bitmask field splitting, guarded by a differential fuzz test | Accepted (branch `rust`) |
 | [019](019-mutation-testing.md) | Mutation testing: plant realistic bugs and check the tests catch them | Accepted |
 | [020](020-partitioned-pipeline.md) | Partitioned pipeline: dedup by event_id bucket, then work per person partition | Accepted (branch `partitioned`) |
+| [021](021-linux-profiling.md) | Profile on Linux with perf in Docker | Accepted |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -108,3 +109,5 @@ One line per commit, newest last.
 - 2026-11-21: ADR-020 written; exit without destructors; 4 MB chunks confirmed best (2/4/8/16 MB measured).
 - 2026-11-21: `da351f1` (partitioned) scored 3.02 s, 20% better than 3.80 s.
 - 2026-11-21: Rules audit and performance research by agents recorded; peak memory 1.63 GB at 10M.
+- 2026-11-21: ADR-021: Linux profiling (Dockerfile.profile, scripts/linux_profile.sh). Parsing is about 57% of CPU;
+  THP already `always` in Docker's VM.
