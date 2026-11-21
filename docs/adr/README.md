@@ -30,6 +30,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [023](023-u64-ids-u32-times.md) | 64-bit base-37 IDs and 32-bit event times | Accepted (branch `partitioned`) |
 | [024](024-chunk-scanner.md) | One-pass chunk scanner with 64-byte bitmasks (AVX2 on x86) | Accepted (branch `partitioned`) |
 | [025](025-flat-hash-table.md) | Flat open-addressing table for dedup, products, campaigns and persons | Accepted (branch `partitioned`) |
+| [026](026-links-alongside-parse.md) | Resolve links while events are parsed | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -129,3 +130,4 @@ One line per commit, newest last.
 - 2026-11-21: `c203fa6` (FlatMap) scored 2.45 s, 8% better than 2.67 s; main moves to it, 2.67 s saved as `scored-2.67`.
   Second rules audit (changes since 60c7ade): no issues. Scout reassessment: next are links in parallel, a winners
   bitset, paired FlatMap + prefetch, and a per-partition counting sort.
+- 2026-11-21: ADR-026: links run alongside events parse (events::parse / events::dedup_route split).

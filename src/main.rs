@@ -181,11 +181,12 @@ fn main() {
         events::parse_bench(&ev_src, &ctx);
         return;
     }
-    let persons = links::persons(&ln_src);
-    lap("links");
+    // Links run while events are parsed: parsing needs no person mapping (ADR-026).
+    let (persons, parsed) = rayon::join(|| links::persons(&ln_src), || events::parse(&ev_src, &ctx));
+    lap("links + events parse");
 
-    let (ev, ck) = rayon::join(|| events::load(&ev_src, &ctx, &persons), || clicks::load(&ck_src, &ctx, &persons));
-    lap("events + clicks");
+    let (ev, ck) = rayon::join(|| events::dedup_route(parsed, &ctx, &persons), || clicks::load(&ck_src, &ctx, &persons));
+    lap("events dedup+route + clicks");
 
     let first_day = ctx.window_start.div_euclid(ts::MS_PER_DAY);
     let ndays = ((ctx.window_end - 1).div_euclid(ts::MS_PER_DAY) - first_day + 1) as usize;

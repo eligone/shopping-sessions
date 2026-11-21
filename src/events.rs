@@ -111,12 +111,22 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
     b
 }
 
-/// Parse, dedup, validate, and route each surviving event to its person partition.
-/// Returns `routed[eid_bucket][person_partition]`.
-pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec<Vec<Ev>>> {
+/// Parsed copies of every event, per chunk and eid bucket. Opaque to callers.
+pub struct Parsed(Vec<Vec<Vec<RawEv>>>);
+
+/// Parse every event line. Needs no person mapping, so it runs while links are
+/// being resolved (ADR-026).
+pub fn parse(src: &crate::input::Source, ctx: &Ctx) -> Parsed {
     let t0 = std::time::Instant::now();
-    let parsed: Vec<Vec<Vec<RawEv>>> = src.par_map(|c| parse_chunk(c, ctx));
+    let parsed = Parsed(src.par_map(|c| parse_chunk(c, ctx)));
     eprintln!("    events parse   {:.3}s", t0.elapsed().as_secs_f64());
+    parsed
+}
+
+/// Dedup, validate, and route each surviving event to its person partition.
+/// Returns `routed[eid_bucket][person_partition]`.
+pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec<Vec<Ev>>> {
+    let parsed = parsed.0;
     let t1 = std::time::Instant::now();
     let parts = crate::partition::PARTS;
     let ws = ctx.window_start;
