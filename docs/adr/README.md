@@ -16,7 +16,8 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [009](009-assists-session-ranges.md) | Assists via merged click intervals and ASOF-found session ranges | Accepted |
 | [010](010-verification-and-safe-local-runs.md) | Verify against fixtures, the dev answer and repeat runs; keep runs safe on small machines | Accepted |
 | [011](011-commit-conventions.md) | Commit conventions: no AI co-authors, ADRs updated with every commit | Accepted |
-| [012](012-rust-rewrite.md) | Rewrite the pipeline in Rust, with integer IDs and one parse pass | Accepted (branch `rust`) |
+| [012](012-rust-rewrite.md) | Rewrite the pipeline in Rust, with integer IDs and one parse pass | Accepted |
+| [013](013-readahead-hints.md) | Ask the kernel to read every input file ahead (`madvise WILLNEED`) | Accepted |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -52,3 +53,5 @@ One line per commit, newest last.
 - 2026-11-21: Rust pipeline on branch `rust` (ADR-012): fixtures, dev and 10-dataset diff all match.
 - 2026-11-21: Events sub-stage timers; events and clicks timed separately. Found warm vs cold
   file cache explains half the 5M time (1.35 s cold, 0.70 s warm). CLAUDE.md: commit often.
+- 2026-11-21: Read-ahead hints on all input files, events and clicks concurrent again (ADR-013).
+  Rust merged into `main` for submission.

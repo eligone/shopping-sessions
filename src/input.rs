@@ -36,8 +36,13 @@ impl Files {
                     return None;
                 }
                 let m = unsafe { Mmap::map(&f).ok()? };
+                // Start reading the whole file now, in the background (ADR-013), so a
+                // cold page cache fills while we parse instead of one fault at a time.
                 #[cfg(unix)]
-                let _ = m.advise(memmap2::Advice::Sequential);
+                {
+                    let _ = m.advise(memmap2::Advice::WillNeed);
+                    let _ = m.advise(memmap2::Advice::Sequential);
+                }
                 Some(m)
             })
             .collect();

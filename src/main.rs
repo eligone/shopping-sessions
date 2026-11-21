@@ -130,10 +130,8 @@ fn main() {
     let persons = links::persons(&ln_chunks);
     lap("links");
 
-    let ev = events::load(&ev_chunks, &ctx, &persons);
-    lap("events");
-    let ck = clicks::load(&ck_chunks, &ctx, &persons);
-    lap("clicks");
+    let (ev, ck) = rayon::join(|| events::load(&ev_chunks, &ctx, &persons), || clicks::load(&ck_chunks, &ctx, &persons));
+    lap("events + clicks");
 
     let (sessions, user_days) = sessions::build(ev, ctx.categories.len(), threads);
     lap("sessions");
