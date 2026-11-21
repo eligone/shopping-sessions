@@ -113,3 +113,4 @@ One line per commit, newest last.
 - 2026-11-21: ADR-021: Linux profiling (Dockerfile.profile, scripts/linux_profile.sh). Parsing is about 57% of CPU;
   THP already `always` in Docker's VM.
 - 2026-11-21: ADR-022: run.sh sets MIMALLOC_ALLOW_LARGE_OS_PAGES=1; only run.sh differs from main's code (clean A/B).
+- 2026-11-21: CLAUDE.md: heavy work (benchmarks, tests, generation, Docker) moves off the laptop to a cloud VM.

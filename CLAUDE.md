@@ -29,7 +29,11 @@ Score is container run time on hidden data, so correctness first, then speed.
 - Before a risky rewrite, run `scripts/mutation_test.py` to confirm the tests still catch planted bugs.
 - Never commit data: `dev*/` and `out*/` are git-ignored; keep the repo under 50 MB.
 
-## Running locally (8 GB laptop)
+## Where to run things
 
-Cap resources so the machine stays usable: `NCPU=4 MEM_GB=3`, run under `nice -n 10`.
-Use the project venv at `../.venv` for Python.
+**Do not run heavy work on the owner's laptop** (8 GB Mac, often near its memory limit): no
+benchmarks, test suites, dataset generation, Docker, or large builds there. Run them on a cloud
+Linux VM (AWS or GCP, ideally matching the scorer: x86 Intel, 8 vCPUs; GCP n2-standard-8 or AWS
+c6i.2xlarge), created with the owner's approval and deleted or stopped when done.
+Light work is fine locally: reading and editing code, git, small scripts.
+The project venv for Python is at `../.venv`.
