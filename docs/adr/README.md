@@ -67,3 +67,4 @@ One line per commit, newest last.
 - 2026-11-21: Option A (`c44891f`) scored 4.06 s. Saved as branch `option-1`; `main` moves to the
   pread version (option B) for the next submission.
 - 2026-11-21: Option B (`3b5c1d3`) scored 4.05 s, a tie with A: next target is CPU work, not I/O.
+- 2026-11-21: `scripts/check.sh` runs every correctness check in one command (`full` for 9 seeds and 5M).

@@ -23,8 +23,9 @@ Score is container run time on hidden data, so correctness first, then speed.
 
 ## Before any commit that touches the pipeline
 
-- All 36 fixtures pass: `python3 scripts/run_fixtures.py fixtures -- <pipeline command>`
-- Dev set matches exactly: run on `dev/`, then `python3 scripts/compare.py out ../dev-answer`
+- Run `scripts/check.sh`: build, unit tests, 36 fixtures in both read modes, exact dev-set
+  match, and Rust-vs-DuckDB diffs on 2 seeds. It must end with `ALL CHECKS PASSED`.
+- Before merging into `main` or submitting, run `scripts/check.sh full` (9 seeds and the 5M set).
 - Never commit data: `dev*/` and `out*/` are git-ignored; keep the repo under 50 MB.
 
 ## Running locally (8 GB laptop)
