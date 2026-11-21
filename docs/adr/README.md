@@ -40,6 +40,18 @@ Score is run time from container start to exit, lower is better.
 
 ## Open questions
 
+- **Rules audit (agent, `60c7ade`):** no input valid under rules.md found that the code gets wrong.
+  Speculative notes:
+  - peak memory at 60M: measured 0.91 GB at 5M and 1.63 GB at 10M, so about 10 GB at 60M against a
+    24 GB limit: OK;
+  - stale `part-N.parquet` files if `/output` were reused (the scorer gives an empty one);
+  - hidden `.x.csv` files would be read;
+  - u16 campaign and category indices would wrap above 65,535 distinct values (the spec says
+    2,000 and 20).
+- **Research scout (agent):** top ideas are huge pages for heap memory, u64 IDs plus u32 relative
+  times (records 56/32 B down to about 32/16 B), whole-block AVX2 structural masks with no
+  per-line copy, cache-sized custom dedup and product tables, and per-partition radix sort.
+
 - **Second submission (`c27152b`, DuckDB): scored 37.63 s** on about 20M events.
 - **Third submission (`c44891f`, Rust + mmap/`WILLNEED`, option A): scored 4.06 s**, best so far.
   Saved on branch `option-1`.
@@ -95,3 +107,4 @@ One line per commit, newest last.
 - 2026-11-21: mimalloc as the global allocator: 10M at 8 threads 1.75-2.11 -> 1.40-1.67 s, about 15% fewer page reclaims.
 - 2026-11-21: ADR-020 written; exit without destructors; 4 MB chunks confirmed best (2/4/8/16 MB measured).
 - 2026-11-21: `da351f1` (partitioned) scored 3.02 s, 20% better than 3.80 s.
+- 2026-11-21: Rules audit and performance research by agents recorded; peak memory 1.63 GB at 10M.
