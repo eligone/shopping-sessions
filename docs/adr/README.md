@@ -91,3 +91,4 @@ One line per commit, newest last.
 - 2026-11-21: `1f93dbc` scored 3.80 s (best). Leaderboard top is 0.28 s.
 - 2026-11-21: Branch `partitioned`: 256 eid buckets -> 256 person partitions; per-partition sort, sessions,
   attribution (no global sort). Buckets from the middle of the hash. All checks pass.
+- 2026-11-21: mimalloc as the global allocator: 10M at 8 threads 1.75-2.11 -> 1.40-1.67 s, about 15% fewer page reclaims.

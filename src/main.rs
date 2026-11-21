@@ -24,6 +24,11 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+/// mimalloc keeps freed memory for reuse instead of returning it to the OS,
+/// which cuts page faults from the many per-partition buffers (ADR-020).
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// Read-only lookups shared by every stage.
 pub struct Ctx {
     pub window_start: i64,
