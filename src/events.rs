@@ -17,16 +17,29 @@ const BAD_TS: i64 = i64::MIN;
 const NO_PRODUCT: u16 = u16::MAX;
 const MAX_PRICE: u32 = 10_000_000;
 
-/// One parsed (not yet validated) copy of an event.
+/// One parsed copy of an event. Validity is decided here, per copy, because the
+/// rules validate whichever copy wins dedup (ADR-015). IDs are stored as two
+/// u64 halves so the struct is 8-byte aligned: 56 bytes instead of 64.
 #[derive(Clone, Copy)]
 struct RawEv {
-    eid: Key,
-    user: Key, // 0 = null (a packed non-empty ID is never 0)
-    ts: i64,   // BAD_TS = bad timestamp
-    ingest: i64,
-    price: u32, // 0 = not a valid purchase price
-    cat: u16,   // NO_PRODUCT = null product_id
-    etype: u8,  // 0 = not view / cart / purchase
+    eid: [u64; 2],
+    user: [u64; 2],
+    ingest: i64, // dedup order: smallest wins
+    ts: i64,
+    price: u32,  // purchase price (0 for view / cart)
+    cat: u16,
+    etype: u8,
+    valid: bool, // passes every rule check, including "not late"
+}
+
+#[inline]
+fn split(k: Key) -> [u64; 2] {
+    [k as u64, (k >> 64) as u64]
+}
+
+#[inline]
+fn join(k: [u64; 2]) -> Key {
+    k[0] as u128 | ((k[1] as u128) << 64)
 }
 
 /// A surviving event.
@@ -73,6 +86,7 @@ fn event_type(b: Option<&[u8]>) -> u8 {
 fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
     let est = chunk.len() / 70 / BUCKETS + 16;
     let mut b: Vec<Vec<RawEv>> = (0..BUCKETS).map(|_| Vec::with_capacity(est)).collect();
+    let (ws, we) = (ctx.window_start, ctx.window_end);
     for line in csv::lines(chunk) {
         let mut f = [None; 7];
         if !csv::fields::<7>(line, &mut f) {
@@ -81,17 +95,30 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
         let Some(eid) = f[0] else { continue };
         let eid = ids::pack(eid);
         let etype = event_type(f[4]);
+        let ts = f[2].and_then(ts::parse_ts).unwrap_or(BAD_TS);
+        let ingest = f[3].map_or(i64::MAX, ts::parse_ingest);
+        let price = if etype == PURCHASE { parse_price(f[6]) } else { 0 };
+        let cat = match f[5] {
+            None => NO_PRODUCT,
+            Some(p) => ctx.category_of(ids::pack(p)),
+        };
+        let valid = f[1].is_some()
+            && ts != BAD_TS
+            && ts >= ws
+            && ts < we
+            && etype != 0
+            && cat != NO_PRODUCT
+            && (etype != PURCHASE || price != 0)
+            && ingest.saturating_sub(ts) <= ts::MS_PER_DAY;
         let r = RawEv {
-            eid,
-            user: f[1].map_or(0, ids::pack),
-            ts: f[2].and_then(ts::parse_ts).unwrap_or(BAD_TS),
-            ingest: f[3].map_or(i64::MAX, ts::parse_ingest),
-            price: if etype == PURCHASE { parse_price(f[6]) } else { 0 },
-            cat: match f[5] {
-                None => NO_PRODUCT,
-                Some(p) => ctx.category_of(ids::pack(p)),
-            },
+            eid: split(eid),
+            user: split(f[1].map_or(0, ids::pack)),
+            ingest,
+            ts,
+            price,
+            cat,
             etype,
+            valid,
         };
         b[(ids::mix(eid) >> (64 - BUCKET_BITS)) as usize].push(r);
     }
@@ -102,60 +129,78 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
 pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Ev> {
     let t0 = std::time::Instant::now();
     let parsed: Vec<Vec<Vec<RawEv>>> = src.par_map(|c| parse_chunk(c, ctx));
-    eprintln!("    events parse   {:.3}s", t0.elapsed().as_secs_f64()); let t1 = std::time::Instant::now();
-    let (ws, we) = (ctx.window_start, ctx.window_end);
+    eprintln!("    events parse   {:.3}s", t0.elapsed().as_secs_f64());
+    let t1 = std::time::Instant::now();
 
-    let per_bucket: Vec<Vec<Ev>> = (0..BUCKETS)
+    // Dedup per bucket without copying records: remember WHERE each event's best
+    // copy is, as (chunk << 32 | position), then keep only the valid winners.
+    let winners: Vec<Vec<u64>> = (0..BUCKETS)
         .into_par_iter()
         .map(|bi| {
             let n: usize = parsed.iter().map(|p| p[bi].len()).sum();
-            // Dedup: keep the copy with the smallest ingest_ts. Equal ingest_ts copies are identical.
-            let mut best: KeyMap<u32> = ids::key_map(n);
-            let mut kept: Vec<RawEv> = Vec::with_capacity(n);
-            for p in &parsed {
-                for r in &p[bi] {
-                    match best.get(&r.eid) {
-                        Some(&i) => {
-                            if r.ingest < kept[i as usize].ingest {
-                                kept[i as usize] = *r;
+            let mut best: KeyMap<u64> = ids::key_map(n);
+            for (ci, p) in parsed.iter().enumerate() {
+                for (pos, r) in p[bi].iter().enumerate() {
+                    let here = (ci as u64) << 32 | pos as u64;
+                    best.entry(join(r.eid))
+                        .and_modify(|loc| {
+                            let cur = &parsed[(*loc >> 32) as usize][bi][(*loc & 0xFFFF_FFFF) as usize];
+                            if r.ingest < cur.ingest {
+                                *loc = here;
                             }
-                        }
-                        None => {
-                            best.insert(r.eid, kept.len() as u32);
-                            kept.push(*r);
-                        }
-                    }
+                        })
+                        .or_insert(here);
                 }
             }
-            // Validate the kept copy, then drop late events.
-            kept.iter()
-                .filter(|r| {
-                    r.user != 0
-                        && r.ts != BAD_TS
-                        && r.ts >= ws
-                        && r.ts < we
-                        && r.etype != 0
-                        && r.cat != NO_PRODUCT
-                        && (r.etype != PURCHASE || r.price != 0)
-                        && r.ingest.saturating_sub(r.ts) <= ts::MS_PER_DAY
-                })
-                .map(|r| Ev {
-                    person: persons.get(&r.user).copied().unwrap_or(r.user),
+            let mut w: Vec<u64> = best
+                .into_values()
+                .filter(|&loc| parsed[(loc >> 32) as usize][bi][(loc & 0xFFFF_FFFF) as usize].valid)
+                .collect();
+            w.sort_unstable(); // read the winners back in memory order
+            w
+        })
+        .collect();
+    eprintln!("    events dedup   {:.3}s", t1.elapsed().as_secs_f64());
+    let t2 = std::time::Instant::now();
+
+    // One output vector, sized exactly; each bucket fills its own slice in parallel.
+    let total: usize = winners.iter().map(|w| w.len()).sum();
+    let mut out: Vec<Ev> = Vec::with_capacity(total);
+    {
+        let spare = &mut out.spare_capacity_mut()[..total];
+        let mut slices = Vec::with_capacity(BUCKETS);
+        let mut rest = spare;
+        for w in &winners {
+            let (head, tail) = rest.split_at_mut(w.len());
+            slices.push(head);
+            rest = tail;
+        }
+        slices.into_par_iter().zip(winners.par_iter()).enumerate().for_each(|(bi, (slot, w))| {
+            for (dst, &loc) in slot.iter_mut().zip(w) {
+                let r = &parsed[(loc >> 32) as usize][bi][(loc & 0xFFFF_FFFF) as usize];
+                let user = join(r.user);
+                dst.write(Ev {
+                    person: persons.get(&user).copied().unwrap_or(user),
                     ts: r.ts,
                     price: r.price,
                     cat: r.cat,
                     etype: r.etype,
-                })
-                .collect()
-        })
-        .collect();
-
-    eprintln!("    events dedup   {:.3}s", t1.elapsed().as_secs_f64()); let t2 = std::time::Instant::now();
-    let total: usize = per_bucket.iter().map(|v| v.len()).sum();
-    let mut out = Vec::with_capacity(total);
-    for v in per_bucket {
-        out.extend_from_slice(&v);
+                });
+            }
+        });
     }
-    eprintln!("    events concat  {:.3}s", t2.elapsed().as_secs_f64());
+    // SAFETY: every one of the first `total` slots was written above.
+    unsafe { out.set_len(total) };
+    eprintln!("    events build   {:.3}s", t2.elapsed().as_secs_f64());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn record_sizes() {
+        // ADR-015: keep the per-line record small; it is written once per input line.
+        assert_eq!(std::mem::size_of::<super::RawEv>(), 56);
+        assert_eq!(std::mem::size_of::<super::Ev>(), 32);
+    }
 }

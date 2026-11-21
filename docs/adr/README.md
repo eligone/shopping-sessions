@@ -19,6 +19,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [012](012-rust-rewrite.md) | Rewrite the pipeline in Rust, with integer IDs and one parse pass | Accepted |
 | [013](013-readahead-hints.md) | Ask the kernel to read every input file ahead (`madvise WILLNEED`) | Accepted |
 | [014](014-pread-read-mode.md) | Parallel `pread` read mode, selectable against mmap | Accepted (branch `rust`) |
+| [015](015-fewer-event-copies.md) | Fewer copies of each event: validate at parse, dedup by location, fill one output | Accepted (branch `rust`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -70,3 +71,5 @@ One line per commit, newest last.
 - 2026-11-21: `scripts/check.sh` runs every correctness check in one command (`full` for 9 seeds and 5M).
 - 2026-11-21: Sub-stage timers for links, clicks, sessions, output. 10M profile: memory traffic and
   first-touch page faults dominate (252k page reclaims, about 4 GB touched, 1.35 s system time).
+- 2026-11-21: ADR-015: events validated at parse, deduped by location, built into one output; RawEv 56 B.
+  Dedup about 40% faster, about 25% fewer page reclaims at 10M.
