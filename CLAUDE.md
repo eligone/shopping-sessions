@@ -14,6 +14,12 @@ Score is container run time on hidden data, so correctness first, then speed.
    - a change to an existing decision → edit that ADR (or mark it Superseded and add a new one);
    - new measurements, scores or open questions → update `docs/adr/README.md`.
    Commit the ADR change in the same commit as the code it describes.
+   Every commit also adds one line to the **Changelog** in `docs/adr/README.md`
+   (short SHA is not known yet, so write the date and what changed).
+3. **Commit often.** Commit whenever a new file is created and after every meaningful change
+   (a fix, an optimization, new instrumentation, a doc update): small, focused commits rather
+   than one big one at the end. Don't leave working changes uncommitted between steps.
+   Push to the current branch after committing.
 
 ## Before any commit that touches the pipeline
 

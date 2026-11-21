@@ -100,7 +100,9 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
 
 /// Parse, dedup, validate. Returns surviving events in arbitrary order.
 pub fn load(chunks: &[&[u8]], ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Ev> {
+    let t0 = std::time::Instant::now();
     let parsed: Vec<Vec<Vec<RawEv>>> = chunks.par_iter().map(|c| parse_chunk(c, ctx)).collect();
+    eprintln!("    events parse   {:.3}s", t0.elapsed().as_secs_f64()); let t1 = std::time::Instant::now();
     let (ws, we) = (ctx.window_start, ctx.window_end);
 
     let per_bucket: Vec<Vec<Ev>> = (0..BUCKETS)
@@ -148,10 +150,12 @@ pub fn load(chunks: &[&[u8]], ctx: &Ctx, persons: &KeyMap<Key>) -> Vec<Ev> {
         })
         .collect();
 
+    eprintln!("    events dedup   {:.3}s", t1.elapsed().as_secs_f64()); let t2 = std::time::Instant::now();
     let total: usize = per_bucket.iter().map(|v| v.len()).sum();
     let mut out = Vec::with_capacity(total);
     for v in per_bucket {
         out.extend_from_slice(&v);
     }
+    eprintln!("    events concat  {:.3}s", t2.elapsed().as_secs_f64());
     out
 }
