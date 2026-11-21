@@ -39,3 +39,6 @@ into our buffers (system time 0.23–0.32 s against 0.13 s).
 **Consequences.** Submit both and keep whichever the scorer favours. Possible hybrid if the
 scorer turns out cold: keep mmap, but pre-fault the pages from all threads in parallel before
 parsing.
+
+**Scored result.** Option A (`c44891f`) 4.06 s; option B (`3b5c1d3`) 4.05 s on about 20M events: a
+tie within scorer noise. The scorer is not I/O-bound here; `pread` stays the default.
