@@ -24,6 +24,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [017](017-parse-ablation.md) | Measure the events parse by ablation before optimizing it | Accepted (branch `rust`) |
 | [018](018-bitmask-field-splitting.md) | Bitmask field splitting, guarded by a differential fuzz test | Accepted (branch `rust`) |
 | [019](019-mutation-testing.md) | Mutation testing: plant realistic bugs and check the tests catch them | Accepted |
+| [020](020-partitioned-pipeline.md) | Partitioned pipeline: dedup by event_id bucket, then work per person partition | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -92,3 +93,4 @@ One line per commit, newest last.
 - 2026-11-21: Branch `partitioned`: 256 eid buckets -> 256 person partitions; per-partition sort, sessions,
   attribution (no global sort). Buckets from the middle of the hash. All checks pass.
 - 2026-11-21: mimalloc as the global allocator: 10M at 8 threads 1.75-2.11 -> 1.40-1.67 s, about 15% fewer page reclaims.
+- 2026-11-21: ADR-020 written; exit without destructors; 4 MB chunks confirmed best (2/4/8/16 MB measured).

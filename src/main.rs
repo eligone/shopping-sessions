@@ -148,7 +148,9 @@ fn main() {
     let ndays = ((ctx.window_end - 1).div_euclid(ts::MS_PER_DAY) - first_day + 1) as usize;
     let ncamp = ctx.campaign_names.len();
     let totals = partition::run(&ev, &ck, ctx.categories.len(), ncamp, first_day, ndays);
-    drop((ev, ck));
+    // Don't free the routed events and clicks: the OS reclaims all memory at exit
+    // in one step, which is much faster than freeing it piece by piece (ADR-020).
+    std::mem::forget((ev, ck));
     let cd = totals.cd;
     let n_sessions = totals.sessions;
     let user_days = par::par_concat(totals.days);
@@ -202,4 +204,7 @@ fn main() {
     output::write(&cd_dir.join("part-0.parquet"), output::CAMPAIGN_DAILY, cols).expect("write campaign_daily");
     lap("output campaign_daily");
     eprintln!("[{:>8.3}s] TOTAL ({} sessions, {} user-days)", t0.elapsed().as_secs_f64(), n_sessions, user_days.len());
+    // Exit without running destructors: the output files are written and closed,
+    // and the scorer's clock runs until the process exits (ADR-020).
+    std::process::exit(0);
 }
