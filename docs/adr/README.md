@@ -22,6 +22,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [015](015-fewer-event-copies.md) | Fewer copies of each event: validate at parse, dedup by location, fill one output | Accepted (branch `rust`) |
 | [016](016-parallel-concat.md) | Parallel concat for per-task results (clicks) | Accepted (branch `rust`); unproven locally |
 | [017](017-parse-ablation.md) | Measure the events parse by ablation before optimizing it | Accepted (branch `rust`) |
+| [018](018-bitmask-field-splitting.md) | Bitmask field splitting, guarded by a differential fuzz test | Accepted (branch `rust`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -79,3 +80,5 @@ One line per commit, newest last.
   memory pressure (6 GB swap) now exceeds the effects, so the scorer measures from here.
 - 2026-11-21: ADR-017: `SS_STAGE=parsebench` ablation. Field splitting is 35% of parse (the largest
   single cost); expected gain from SIMD about 25% of parse, about 8% of the run.
+- 2026-11-21: ADR-018: bitmask `csv::fields` (scalar kept as reference), fuzz test with mutation check.
+  Events parse 0.61 -> 0.53 s at 10M on the Mac (ARM); may differ on x86.
