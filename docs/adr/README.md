@@ -45,8 +45,8 @@ Score is run time from container start to exit, lower is better.
   Saved on branch `option-1`.
 - **Fourth submission (`3b5c1d3`, Rust + pread, option B): scored 4.05 s**, a tie with A within
   scorer noise (about 20%). Reading mode is not the bottleneck on the scorer.
-- **Fifth submission (`1f93dbc`, ADR-015/016/018): scored 3.80 s**, best so far. The leaderboard top is
-  0.28 s.
+- **Fifth submission (`1f93dbc`, ADR-015/016/018): scored 3.80 s.** The leaderboard top is 0.28 s.
+- **Sixth submission (`da351f1`, partitioned pipeline + mimalloc, ADR-020): scored 3.02 s**, best so far.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -94,3 +94,4 @@ One line per commit, newest last.
   attribution (no global sort). Buckets from the middle of the hash. All checks pass.
 - 2026-11-21: mimalloc as the global allocator: 10M at 8 threads 1.75-2.11 -> 1.40-1.67 s, about 15% fewer page reclaims.
 - 2026-11-21: ADR-020 written; exit without destructors; 4 MB chunks confirmed best (2/4/8/16 MB measured).
+- 2026-11-21: `da351f1` (partitioned) scored 3.02 s, 20% better than 3.80 s.

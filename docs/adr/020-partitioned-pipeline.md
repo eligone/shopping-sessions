@@ -43,3 +43,6 @@ Chunk size, re-measured: 4 MB was fastest in all 3 rounds (against 2, 8 and 16 M
 
 **Consequences.** Events parse (about 0.6–0.8 s at 10M) remains the largest stage, then
 dedup+route (about 0.3 s) and the partition stage (about 0.25–0.35 s).
+
+**Scored result.** `da351f1` scored **3.02 s** on about 20M events, against 3.80 s for `1f93dbc`
+(a 20% gain, more than the 15–25% measured on macOS).
