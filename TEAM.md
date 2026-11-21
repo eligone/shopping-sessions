@@ -1,5 +1,5 @@
 # Team
 
-Name:
-Members:
+Name: Anais Gonzalez
+Members: Anais Gonzalez
 Engine: DuckDB
