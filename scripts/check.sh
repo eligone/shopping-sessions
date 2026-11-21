@@ -8,24 +8,36 @@ cd "$(dirname "$0")/.."
 PY=../.venv/bin/python
 BIN=target/release/shopping-sessions
 
+LOG=$(mktemp)
+trap 'rm -f "$LOG"' EXIT
+# Run a command quietly; on failure show its output and stop. (Piping into grep
+# would hide the exit status: in `a | b` only b's status counts.)
+step() {
+  if ! "$@" > "$LOG" 2>&1; then
+    tail -40 "$LOG"; echo "CHECK FAILED: $*"; exit 1
+  fi
+}
+
 echo "== build"
-nice -n 10 cargo build --release -j 4 2>&1 | grep -E "^(warning|error)|Finished"
+step nice -n 10 cargo build --release -j 4
+grep -E "^warning" "$LOG" || true
+echo "ok"
 
 echo "== unit tests"
-nice -n 10 cargo test --release -j 4 2>&1 | grep -E "test result|FAILED|panicked"
+step nice -n 10 cargo test --release -j 4
+grep -E "test result" "$LOG"
 
 for mode in pread mmap; do
   echo "== fixtures ($mode)"
-  SS_READ=$mode "$PY" scripts/run_fixtures.py fixtures -- "$BIN" > /tmp/ss_fixtures.$$ 2>&1 || { cat /tmp/ss_fixtures.$$; exit 1; }
-  tail -1 /tmp/ss_fixtures.$$
+  SS_READ=$mode step "$PY" scripts/run_fixtures.py fixtures -- "$BIN"
+  tail -1 "$LOG"
 done
-rm -f /tmp/ss_fixtures.$$
 
 echo "== dev set vs dev-answer"
 rm -rf out_check
-DATA_DIR=dev OUTPUT_DIR=out_check NCPU=4 "$BIN" 2>/dev/null
-(cd scripts && "../$PY" compare.py ../out_check ../../dev-answer | tail -1) | grep -q MATCH || { echo "dev DIFFER"; exit 1; }
-echo "MATCH"
+DATA_DIR=dev OUTPUT_DIR=out_check NCPU=4 step "$BIN"
+(cd scripts && step "../$PY" compare.py ../out_check ../../dev-answer)
+tail -1 "$LOG"
 rm -rf out_check
 
 if [ "${1:-}" = "full" ]; then
@@ -34,9 +46,10 @@ if [ "${1:-}" = "full" ]; then
   if [ -d dev5 ]; then
     echo "== diff vs DuckDB, dev5 (5M events)"
     rm -rf o5_rs o5_db s5
-    DATA_DIR=dev5 OUTPUT_DIR=o5_rs NCPU=4 "$BIN" 2>/dev/null
-    mkdir -p s5 && DATA_DIR=dev5 OUTPUT_DIR=o5_db SCRATCH_DIR=s5 NCPU=4 MEM_GB=3 nice -n 10 "$PY" pipeline/pipeline.py >/dev/null 2>&1
-    (cd scripts && "../$PY" compare.py ../o5_rs ../o5_db | tail -1)
+    DATA_DIR=dev5 OUTPUT_DIR=o5_rs NCPU=4 step "$BIN"
+    mkdir -p s5 && DATA_DIR=dev5 OUTPUT_DIR=o5_db SCRATCH_DIR=s5 NCPU=4 MEM_GB=3 step nice -n 10 "$PY" pipeline/pipeline.py
+    (cd scripts && step "../$PY" compare.py ../o5_rs ../o5_db)
+    tail -1 "$LOG"
     rm -rf o5_rs o5_db s5
   fi
 else

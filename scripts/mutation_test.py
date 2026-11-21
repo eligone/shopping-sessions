@@ -85,10 +85,15 @@ def main():
             caught = checks()
         finally:
             shutil.move(backup, full)
+            # The restored file keeps the backup's older timestamp, and cargo would then
+            # treat the mutated build as up to date. Mark it as modified now.
+            os.utime(full, None)
         status = f"CAUGHT by {caught}" if caught else "SURVIVED"
         print(f"{status:<28} {path:<20} {meaning}", flush=True)
         results.append(caught)
-    run(["cargo", "build", "--release", "-q"])  # rebuild the unmutated binary
+    # Rebuild the unmutated binary and test binary.
+    run(["cargo", "build", "--release", "-q"])
+    run(["cargo", "test", "--release", "-q", "--no-run"])
     caught = sum(1 for r in results if r)
     print(f"\n{caught}/{len(results)} mutations caught")
 

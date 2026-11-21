@@ -84,3 +84,5 @@ One line per commit, newest last.
 - 2026-11-21: ADR-018: bitmask `csv::fields` (scalar kept as reference), fuzz test with mutation check.
   Events parse 0.61 -> 0.53 s at 10M on the Mac (ARM); may differ on x86.
 - 2026-11-21: ADR-019: `scripts/mutation_test.py`; 12/15 caught, the 3 survivors are equivalent mutants.
+- 2026-11-21: Fixed check.sh hiding failures behind pipes, and the mutation script leaving a stale build;
+  full check passes on `edff39d`'s code.

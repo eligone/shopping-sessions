@@ -31,3 +31,14 @@ The 3 survivors cannot change any output:
 **Consequences.** Every output-changing mutation is caught (12/12). Run the script after changing
 test coverage or before a risky rewrite. It is slow (about 15 rebuilds), so it is not part of
 `scripts/check.sh`.
+
+**Incident and fix (same day).** The first run left a stale build behind: the restored source
+file kept the backup's older timestamp, so cargo treated the last mutated build as up to date. And
+`scripts/check.sh` did not notice the failing unit tests, because it piped `cargo test` into
+`grep` and a pipeline's exit status is its last command's. Fixes:
+- the mutation script now marks restored files as modified and rebuilds both binaries at the end;
+- `check.sh` runs every step through a `step` helper that stops with the step's output on any
+  failure. Proven by planting a failing assertion, which now stops the script.
+
+The rerun gave identical results (12/15, same 3 equivalent survivors), and `check.sh` passes
+immediately afterwards.
