@@ -26,6 +26,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [019](019-mutation-testing.md) | Mutation testing: plant realistic bugs and check the tests catch them | Accepted |
 | [020](020-partitioned-pipeline.md) | Partitioned pipeline: dedup by event_id bucket, then work per person partition | Accepted (branch `partitioned`) |
 | [021](021-linux-profiling.md) | Profile on Linux with perf in Docker | Accepted |
+| [022](022-huge-pages.md) | Ask mimalloc for huge OS pages (`MIMALLOC_ALLOW_LARGE_OS_PAGES=1`) | Accepted (branch `partitioned`); to be scored |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -111,3 +112,4 @@ One line per commit, newest last.
 - 2026-11-21: Rules audit and performance research by agents recorded; peak memory 1.63 GB at 10M.
 - 2026-11-21: ADR-021: Linux profiling (Dockerfile.profile, scripts/linux_profile.sh). Parsing is about 57% of CPU;
   THP already `always` in Docker's VM.
+- 2026-11-21: ADR-022: run.sh sets MIMALLOC_ALLOW_LARGE_OS_PAGES=1; only run.sh differs from main's code (clean A/B).
