@@ -46,11 +46,10 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
             }
             out
         });
-    let mut v: Vec<Click> = Vec::with_capacity(parts.iter().map(|p| p.len()).sum());
-    for p in parts {
-        v.extend_from_slice(&p);
-    }
     eprintln!("    clicks parse   {:.3}s", t0.elapsed().as_secs_f64());
+    let tc = std::time::Instant::now();
+    let mut v = crate::par::par_concat(parts);
+    eprintln!("    clicks concat  {:.3}s ({} clicks)", tc.elapsed().as_secs_f64(), v.len());
     let t1 = std::time::Instant::now();
     v.par_sort_unstable_by(|a, b| {
         a.person.cmp(&b.person).then(a.ts.cmp(&b.ts)).then_with(|| ids::cmp_ids(a.cid, b.cid))

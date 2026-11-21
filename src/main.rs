@@ -12,6 +12,7 @@ mod ids;
 mod input;
 mod links;
 mod output;
+mod par;
 mod sessions;
 mod ts;
 

@@ -20,6 +20,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [013](013-readahead-hints.md) | Ask the kernel to read every input file ahead (`madvise WILLNEED`) | Accepted |
 | [014](014-pread-read-mode.md) | Parallel `pread` read mode, selectable against mmap | Accepted (branch `rust`) |
 | [015](015-fewer-event-copies.md) | Fewer copies of each event: validate at parse, dedup by location, fill one output | Accepted (branch `rust`) |
+| [016](016-parallel-concat.md) | Parallel concat for per-task results (clicks) | Accepted (branch `rust`); unproven locally |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -73,3 +74,5 @@ One line per commit, newest last.
   first-touch page faults dominate (252k page reclaims, about 4 GB touched, 1.35 s system time).
 - 2026-11-21: ADR-015: events validated at parse, deduped by location, built into one output; RawEv 56 B.
   Dedup about 40% faster, about 25% fewer page reclaims at 10M.
+- 2026-11-21: ADR-016: `src/par.rs` `par_concat`, used by clicks. No measurable local change: the laptop's
+  memory pressure (6 GB swap) now exceeds the effects, so the scorer measures from here.
