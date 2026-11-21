@@ -15,6 +15,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [008](008-credit-asof-join.md) | Credit with an ASOF join over tie-collapsed clicks | Accepted |
 | [009](009-assists-session-ranges.md) | Assists via merged click intervals and ASOF-found session ranges | Accepted |
 | [010](010-verification-and-safe-local-runs.md) | Verify against fixtures, the dev answer and repeat runs; keep runs safe on small machines | Accepted |
+| [011](011-commit-conventions.md) | Commit conventions: no AI co-authors, ADRs updated with every commit | Accepted |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -30,6 +31,7 @@ Score is run time from container start to exit, lower is better.
 
 ## Open questions
 
+- **Second submission (`c27152b`): scored 37.63 s** on about 20M events, entered in the final.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
