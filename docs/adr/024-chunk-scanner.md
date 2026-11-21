@@ -31,3 +31,6 @@ pointed out that since quotes never contain commas, simdjson's quote tracking is
 **Risk.** The AVX2 path is compiled and run only on x86. Locally only the portable path is built
 and tested. The AVX2 block was reviewed by hand; the scorer's dev-set check rejects a submission
 whose output differs, so a mistake there costs one submission slot, not a wrong score.
+
+**Scored result.** `55032eb` (together with ADR-022 and ADR-023) scored **2.67 s**, against 3.02 s, and
+passed the scorer's dev-set check, so the AVX2 path builds and gives correct output on x86.

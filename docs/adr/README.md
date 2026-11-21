@@ -62,7 +62,9 @@ Score is run time from container start to exit, lower is better.
 - **Fourth submission (`3b5c1d3`, Rust + pread, option B): scored 4.05 s**, a tie with A within
   scorer noise (about 20%). Reading mode is not the bottleneck on the scorer.
 - **Fifth submission (`1f93dbc`, ADR-015/016/018): scored 3.80 s.** The leaderboard top is 0.28 s.
-- **Sixth submission (`da351f1`, partitioned pipeline + mimalloc, ADR-020): scored 3.02 s**, best so far.
+- **Sixth submission (`da351f1`, partitioned pipeline + mimalloc, ADR-020): scored 3.02 s.**
+- **Seventh submission (`55032eb`, huge pages + u64 IDs + chunk scanner, ADR-022/023/024): scored 2.67 s**,
+  best so far. It also confirms the AVX2 path builds and is correct on the scorer.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -119,3 +121,4 @@ One line per commit, newest last.
 - 2026-11-21: ADR-023: u64 base-37 IDs (escape bit for others), u32 event times; RawEv 40 B, Ev 24 B.
   check.sh builds with -j 2 to stay light on the laptop.
 - 2026-11-21: ADR-024: one-pass chunk scanner (AVX2 masks on x86) for events, clicks, links; fuzz-tested.
+- 2026-11-21: `55032eb` scored 2.67 s (12% better than 3.02 s); main moves to it, 3.02 s saved as `scored-3.02`.
