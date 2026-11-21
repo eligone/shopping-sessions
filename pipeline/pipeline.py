@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 
 import duckdb
 import numpy as np
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
 
 DATA = os.environ.get("DATA_DIR", "/data")
 OUT = os.environ.get("OUTPUT_DIR", "/output")
@@ -100,15 +102,29 @@ def load_csv_dir(table, folder, columns):
         cols = ", ".join(f"NULL::VARCHAR AS {c}" for c in columns)
         con.execute(f"CREATE TEMP TABLE {table} AS SELECT {cols} WHERE false")
         return
-    file_list = "[" + ", ".join(sql_str(p) for p in files) + "]"
     line_re = FIELD + "(?:," + FIELD + "){" + str(n - 1) + "}"
     cols = ", ".join(f"nullif(replace(f[{i + 1}], '\"', ''), '') AS {c}" for i, c in enumerate(columns))
+
+    # DuckDB's CSV reader is ~25x faster at producing raw lines, but it also
+    # breaks lines at \r. The generator never writes \r, so use the fast reader
+    # for files without one and an exact split-on-\n for the rest.
+    all_list = "[" + ", ".join(sql_str(p) for p in files) + "]"
+    cr_files = {r[0] for r in con.execute(
+        f"SELECT filename FROM read_text({all_list}) WHERE contains(content, chr(13))").fetchall()}
+    fast = [p for p in files if p not in cr_files and os.path.abspath(p) not in cr_files]
+    slow = [p for p in files if p not in fast]
+    parts = []
+    if fast:
+        fast_list = "[" + ", ".join(sql_str(p) for p in fast) + "]"
+        parts.append(f"""SELECT line FROM read_csv({fast_list}, columns={{'line': 'VARCHAR'}}, header=true,
+                         delim=chr(1), quote='', escape='', auto_detect=false, new_line='\\n')""")
+    if slow:
+        slow_list = "[" + ", ".join(sql_str(p) for p in slow) + "]"
+        parts.append(f"""SELECT unnest(string_split(content, chr(10))[2:]) AS line   -- [2:] skips the header
+                         FROM read_text({slow_list})""")
     con.execute(f"""
         CREATE TEMP TABLE {table} AS
-        WITH raw AS (
-            SELECT unnest(string_split(content, chr(10))[2:]) AS line   -- [2:] skips the header
-            FROM read_text({file_list})
-        ),
+        WITH raw AS ({" UNION ALL ".join(parts)}),
         ok AS (
             SELECT string_split(line, ',') AS f FROM raw
             WHERE regexp_full_match(line, {sql_str(line_re)})
@@ -153,26 +169,17 @@ edges = con.execute("""
 """).fetchnumpy()
 n_ids = con.execute("SELECT count(*) FROM link_ids").fetchone()[0]
 
-label = np.arange(n_ids, dtype=np.int64)
 ea = np.asarray(edges["a"], dtype=np.int64)
 eb = np.asarray(edges["b"], dtype=np.int64)
-while len(ea):
-    # hook: each endpoint takes the smaller label of the two
-    m = np.minimum(label[ea], label[eb])
-    new = label.copy()
-    np.minimum.at(new, ea, m)
-    np.minimum.at(new, eb, m)
-    # shortcut: pointer jumping until every node points at a root
-    while True:
-        jumped = new[new]
-        if np.array_equal(jumped, new):
-            break
-        new = jumped
-    if np.array_equal(new, label):
-        break
-    label = new
+# Connected components in C (linear time), then name each component by its
+# smallest index, which is the byte-wise smallest ID.
+graph = coo_matrix((np.ones(len(ea), dtype=np.int8), (ea, eb)), shape=(n_ids, n_ids))
+_, comp = connected_components(graph, directed=False)
+comp_min = np.full(comp.max() + 1 if n_ids else 0, n_ids, dtype=np.int64)
+np.minimum.at(comp_min, comp, np.arange(n_ids, dtype=np.int64))
+label = comp_min[comp] if n_ids else np.zeros(0, dtype=np.int64)
 
-person_lab = {"idx": np.arange(n_ids, dtype=np.int64), "lab": label}
+con.register("person_lab", {"idx": np.arange(n_ids, dtype=np.int64), "lab": label})
 con.execute("""
     CREATE TEMP TABLE person_map AS
     SELECT i.id AS user_id, r.id AS person
@@ -186,11 +193,15 @@ print(f"links: {n_ids} linked ids, {len(np.unique(label))} persons")
 con.execute(f"""
     CREATE TEMP TABLE ev AS
     WITH dedup AS (                      -- dedup BEFORE validation: earliest ingest_ts wins
-        SELECT * FROM (SELECT *, parse_ts(ingest_ts) AS ingest_ms FROM ev_raw WHERE event_id IS NOT NULL)
-        QUALIFY row_number() OVER (PARTITION BY event_id ORDER BY ingest_ms) = 1
+        -- ingest_ts is always fixed-width F1, so string order is time order.
+        -- Copies with equal ingest_ts are identical, so any minimum is fine.
+        SELECT * FROM ev_raw WHERE event_id IS NOT NULL
+        QUALIFY row_number() OVER (PARTITION BY event_id ORDER BY ingest_ts) = 1
     ),
-    parsed AS (
-        SELECT *, parse_ts(ts) AS ts_ms FROM dedup
+    parsed AS MATERIALIZED (              -- parse each ts once, not once per predicate
+        SELECT *, parse_ts(ts) AS ts_ms,
+               epoch_ms(try_strptime(ingest_ts, '%Y-%m-%dT%H:%M:%SZ')) AS ingest_ms
+        FROM dedup
     ),
     valid AS (
         SELECT user_id, ts_ms, event_type, product_id,
@@ -224,7 +235,7 @@ con.execute(f"""
         FROM ev WINDOW w AS (PARTITION BY person ORDER BY ts_ms)
     )
     SELECT *, sum(is_new) OVER (PARTITION BY person ORDER BY ts_ms
-                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS sess_no
+                                RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS sess_no
     FROM g
 """)
 
@@ -286,16 +297,37 @@ con.execute(f"""
     ),
     g AS (
         SELECT *, sum(is_new) OVER (PARTITION BY person, campaign_id ORDER BY ts_ms
-                                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS grp
+                                    RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS grp
         FROM c
     ),
     iv AS (
         SELECT person, campaign_id, min(ts_ms) AS lo, max(ts_ms) + {WEEK_MS} AS hi
         FROM g GROUP BY person, campaign_id, grp
+    ),
+    -- A person's session starts are distinct, so number them in time order.
+    -- Each interval then covers a contiguous run [r1, r2] of session numbers,
+    -- found with two ASOF lookups; this stays linear even for a shared-device
+    -- "person" with tens of thousands of sessions and clicks.
+    sr AS (
+        SELECT person, start_ms, day,
+               row_number() OVER (PARTITION BY person ORDER BY start_ms) AS r
+        FROM sessions
+    ),
+    lo_r AS (   -- first session starting at or after lo
+        SELECT iv.*, s.r AS r1 FROM iv ASOF JOIN sr s ON iv.person = s.person AND iv.lo <= s.start_ms
+    ),
+    rng AS (    -- last session starting at or before hi
+        SELECT l.person, l.campaign_id, l.r1, s.r AS r2
+        FROM lo_r l ASOF JOIN sr s ON l.person = s.person AND l.hi >= s.start_ms
+        WHERE s.r >= l.r1
+    ),
+    pday AS (   -- each person's session numbers per day (at most ~15 rows per person)
+        SELECT person, day, min(r) AS a, max(r) AS b FROM sr GROUP BY person, day
     )
-    SELECT iv.campaign_id, s.day, count(*) AS assisted_sessions
-    FROM sessions s JOIN iv ON s.person = iv.person AND s.start_ms >= iv.lo AND s.start_ms <= iv.hi
-    GROUP BY iv.campaign_id, s.day
+    SELECT rng.campaign_id, pday.day,
+           sum(least(pday.b, rng.r2) - greatest(pday.a, rng.r1) + 1) AS assisted_sessions
+    FROM rng JOIN pday ON pday.person = rng.person AND pday.a <= rng.r2 AND pday.b >= rng.r1
+    GROUP BY rng.campaign_id, pday.day
 """)
 
 # ---------------------------------------------------------------------------
