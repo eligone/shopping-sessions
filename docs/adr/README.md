@@ -18,6 +18,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [011](011-commit-conventions.md) | Commit conventions: no AI co-authors, ADRs updated with every commit | Accepted |
 | [012](012-rust-rewrite.md) | Rewrite the pipeline in Rust, with integer IDs and one parse pass | Accepted |
 | [013](013-readahead-hints.md) | Ask the kernel to read every input file ahead (`madvise WILLNEED`) | Accepted |
+| [014](014-pread-read-mode.md) | Parallel `pread` read mode, selectable against mmap | Accepted (branch `rust`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -57,3 +58,5 @@ One line per commit, newest last.
   Rust merged into `main` for submission.
 - 2026-11-21: Option B in progress: `pread` read mode (default) next to `mmap` (`SS_READ=mmap`);
   line-ownership boundary test for every chunk size. Fixtures and dev MATCH in both modes.
+- 2026-11-21: ADR-014: pread vs mmap measured (pread about 25% faster cold, about 10% slower warm); 5M
+  pread output identical to DuckDB.
