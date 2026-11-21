@@ -186,9 +186,21 @@ nondeterminism (ADR-007) that neither of the other two caught.
 
 ---
 
+## Targets (from the track page)
+
+| Run | Data | Limit | Goal |
+| --- | --- | --- | --- |
+| Dev check | 1M events (seed 1) | 3 min | must match exactly |
+| Practice | about 20M events | 2x baseline (171 s), never over 5 min | aim under about 60 s |
+| Final | about 60M events | 3 min per run, all 3 runs must finish | median is the score |
+
+Score is run time from container start to exit, lower is better.
+
 ## Open questions
 
-- **Hidden dataset size and time limit.** The first submission ran past the time limit. Current
-  timing: about 7 s for 5M events on 4 cores. Next candidates if still too slow: the `ev` stage
-  (validation and joins, about 2.7 s), and keeping string IDs out of the large sorts.
+- **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
+  cause is the quadratic assists join on shared-device persons, removed in ADR-009. Current
+  timing: about 7 s for 5M events on 4 laptop cores.
+- **Next speed candidates:** the `ev` stage (validation and joins, about 2.7 s at 5M), and keeping
+  string IDs out of the large sorts.
 - **Docker image not yet built locally** with the added SciPy dependency.
