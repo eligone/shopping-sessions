@@ -23,6 +23,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [016](016-parallel-concat.md) | Parallel concat for per-task results (clicks) | Accepted (branch `rust`); unproven locally |
 | [017](017-parse-ablation.md) | Measure the events parse by ablation before optimizing it | Accepted (branch `rust`) |
 | [018](018-bitmask-field-splitting.md) | Bitmask field splitting, guarded by a differential fuzz test | Accepted (branch `rust`) |
+| [019](019-mutation-testing.md) | Mutation testing: plant realistic bugs and check the tests catch them | Accepted |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -82,3 +83,4 @@ One line per commit, newest last.
   single cost); expected gain from SIMD about 25% of parse, about 8% of the run.
 - 2026-11-21: ADR-018: bitmask `csv::fields` (scalar kept as reference), fuzz test with mutation check.
   Events parse 0.61 -> 0.53 s at 10M on the Mac (ARM); may differ on x86.
+- 2026-11-21: ADR-019: `scripts/mutation_test.py`; 12/15 caught, the 3 survivors are equivalent mutants.

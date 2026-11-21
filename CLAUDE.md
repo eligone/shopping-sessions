@@ -26,6 +26,7 @@ Score is container run time on hidden data, so correctness first, then speed.
 - Run `scripts/check.sh`: build, unit tests, 36 fixtures in both read modes, exact dev-set
   match, and Rust-vs-DuckDB diffs on 2 seeds. It must end with `ALL CHECKS PASSED`.
 - Before merging into `main` or submitting, run `scripts/check.sh full` (9 seeds and the 5M set).
+- Before a risky rewrite, run `scripts/mutation_test.py` to confirm the tests still catch planted bugs.
 - Never commit data: `dev*/` and `out*/` are git-ignored; keep the repo under 50 MB.
 
 ## Running locally (8 GB laptop)
