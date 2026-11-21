@@ -28,6 +28,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [021](021-linux-profiling.md) | Profile on Linux with perf in Docker | Accepted |
 | [022](022-huge-pages.md) | Ask mimalloc for huge OS pages (`MIMALLOC_ALLOW_LARGE_OS_PAGES=1`) | Accepted (branch `partitioned`); to be scored |
 | [023](023-u64-ids-u32-times.md) | 64-bit base-37 IDs and 32-bit event times | Accepted (branch `partitioned`) |
+| [024](024-chunk-scanner.md) | One-pass chunk scanner with 64-byte bitmasks (AVX2 on x86) | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -117,3 +118,4 @@ One line per commit, newest last.
 - 2026-11-21: CLAUDE.md: heavy work (benchmarks, tests, generation, Docker) moves off the laptop to a cloud VM.
 - 2026-11-21: ADR-023: u64 base-37 IDs (escape bit for others), u32 event times; RawEv 40 B, Ev 24 B.
   check.sh builds with -j 2 to stay light on the laptop.
+- 2026-11-21: ADR-024: one-pass chunk scanner (AVX2 masks on x86) for events, clicks, links; fuzz-tested.

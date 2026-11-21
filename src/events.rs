@@ -76,12 +76,8 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
     let est = chunk.len() / 70 / BUCKETS + 16;
     let mut b: Vec<Vec<RawEv>> = (0..BUCKETS).map(|_| Vec::with_capacity(est)).collect();
     let (ws, we) = (ctx.window_start, ctx.window_end);
-    for line in csv::lines(chunk) {
-        let mut f = [None; 7];
-        if !csv::fields::<7>(line, &mut f) {
-            continue;
-        }
-        let Some(eid) = f[0] else { continue };
+    csv::for_each_line::<7>(chunk, |f| {
+        let Some(eid) = f[0] else { return };
         let eid = ids::pack(eid);
         let etype = event_type(f[4]);
         let ts = f[2].and_then(ts::parse_ts).unwrap_or(BAD_TS);
@@ -110,7 +106,7 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
             valid,
         };
         b[crate::partition::bucket(eid)].push(r);
-    }
+    });
     b
 }
 

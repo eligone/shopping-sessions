@@ -26,23 +26,19 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
     src.par_map(|c| {
         let est = c.len() / 45 / parts + 4;
         let mut out: Vec<Vec<Click>> = (0..parts).map(|_| Vec::with_capacity(est)).collect();
-        for line in csv::lines(c) {
-            let mut f = [None; 4];
-            if !csv::fields::<4>(line, &mut f) {
-                continue;
-            }
+        csv::for_each_line::<4>(c, |f| {
             let (Some(cid), Some(user), Some(camp), Some(t)) = (f[0], f[1], f[2], f[3]) else {
-                continue;
+                return;
             };
-            let Some(camp) = ctx.campaign_of(camp) else { continue };
-            let Some(t) = ts::parse_ts(t) else { continue };
+            let Some(camp) = ctx.campaign_of(camp) else { return };
+            let Some(t) = ts::parse_ts(t) else { return };
             if t < lo || t >= hi {
-                continue;
+                return;
             }
             let user = ids::pack(user);
             let person = persons.get(&user).copied().unwrap_or(user);
             out[crate::partition::bucket(person)].push(Click { person, cid: ids::pack(cid), ts: t, camp });
-        }
+        });
         out
     })
 }

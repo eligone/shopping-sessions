@@ -11,15 +11,11 @@ pub fn persons(src: &crate::input::Source) -> KeyMap<Key> {
     let edges: Vec<(Key, Key)> = src
         .par_map(|c| {
             let mut v = Vec::new();
-            for line in csv::lines(c) {
-                let mut f = [None; 2];
-                if !csv::fields::<2>(line, &mut f) {
-                    continue;
-                }
+            csv::for_each_line::<2>(c, |f| {
                 if let (Some(a), Some(b)) = (f[0], f[1]) {
                     v.push((ids::pack(a), ids::pack(b)));
                 }
-            }
+            });
             v
         })
         .into_iter()
