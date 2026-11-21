@@ -48,6 +48,7 @@ pub fn run(
     ncamp: usize,
     first_day: i64,
     ndays: usize,
+    base: i64,
 ) -> Totals {
     let empty = || Totals { days: Vec::new(), cd: CampaignDaily::new(ncamp, first_day, ndays), sessions: 0 };
     (0..PARTS)
@@ -60,7 +61,7 @@ pub fn run(
                 a.person.cmp(&b.person).then(a.ts.cmp(&b.ts)).then_with(|| ids::cmp_ids(a.cid, b.cid))
             });
             c.dedup_by(|b, a| a.cid == b.cid && a.person == b.person && a.ts == b.ts);
-            let (sess, days) = sessions::scan(&e, ncat);
+            let (sess, days) = sessions::scan(&e, ncat, base);
             attribution::walk(&sess, &c, ncamp, &mut acc.cd);
             acc.sessions += sess.len();
             acc.days.push(days);

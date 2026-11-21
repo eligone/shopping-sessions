@@ -70,7 +70,8 @@ impl DayAcc {
 }
 
 /// Sessions and person-days of events sorted by (person, ts).
-pub fn scan(ev: &[Ev], ncat: usize) -> (Vec<Session>, Vec<UserDay>) {
+/// `base` is window_start: `Ev::ts` is relative to it.
+pub fn scan(ev: &[Ev], ncat: usize, base: i64) -> (Vec<Session>, Vec<UserDay>) {
     let mut sessions = Vec::with_capacity(ev.len() / 4 + 1);
     let mut days = Vec::with_capacity(ev.len() / 6 + 1);
     let mut acc = DayAcc {
@@ -86,9 +87,9 @@ pub fn scan(ev: &[Ev], ncat: usize) -> (Vec<Session>, Vec<UserDay>) {
     while i < ev.len() {
         // One session: [i, j)
         let person = ev[i].person;
-        let start = ev[i].ts;
+        let start = base + ev[i].ts as i64;
         let mut j = i + 1;
-        while j < ev.len() && ev[j].person == person && ev[j].ts - ev[j - 1].ts <= GAP {
+        while j < ev.len() && ev[j].person == person && (ev[j].ts - ev[j - 1].ts) as i64 <= GAP {
             j += 1;
         }
         let day = start.div_euclid(MS_PER_DAY) as i32;

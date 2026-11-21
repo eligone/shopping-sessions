@@ -17,10 +17,12 @@ mod partition;
 mod sessions;
 mod ts;
 
-use ids::{Key, KeyMap};
+use ids::KeyMap;
 use output::Col;
 use parquet::data_type::ByteArray;
 use rayon::prelude::*;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -29,26 +31,54 @@ use std::time::Instant;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// Insert only if the key is new; true if it was inserted (first row wins).
+trait InsertNew<K, V> {
+    fn try_insert_new(&mut self, k: K, v: V) -> bool;
+}
+
+impl<K: Hash + Eq, V, S: std::hash::BuildHasher> InsertNew<K, V> for HashMap<K, V, S> {
+    fn try_insert_new(&mut self, k: K, v: V) -> bool {
+        if self.contains_key(&k) {
+            return false;
+        }
+        self.insert(k, v);
+        true
+    }
+}
+
 /// Read-only lookups shared by every stage.
 pub struct Ctx {
     pub window_start: i64,
     pub window_end: i64,
-    products: KeyMap<u16>,
+    products: KeyMap<u16>,                        // base-37 encodable IDs
+    products_other: HashMap<Vec<u8>, u16>,        // any other ID, by bytes
     unknown_cat: u16,
     categories: Vec<Vec<u8>>, // id -> name, ids in byte-wise name order
     campaigns: KeyMap<u16>,
+    campaigns_other: HashMap<Vec<u8>, u16>,
     campaign_names: Vec<Vec<u8>>,
     channels: Vec<Vec<u8>>,
 }
 
 impl Ctx {
     #[inline]
-    pub fn category_of(&self, product: Key) -> u16 {
-        self.products.get(&product).copied().unwrap_or(self.unknown_cat)
+    /// Category of a product ID, `unknown` if not in products.csv. No interning:
+    /// an ID that is not base-37 encodable is looked up by its bytes.
+    pub fn category_of(&self, product: &[u8]) -> u16 {
+        match ids::try_encode(product) {
+            Some(k) => self.products.get(&k),
+            None => self.products_other.get(product),
+        }
+        .copied()
+        .unwrap_or(self.unknown_cat)
     }
     #[inline]
-    pub fn campaign_of(&self, campaign: Key) -> Option<u16> {
-        self.campaigns.get(&campaign).copied()
+    pub fn campaign_of(&self, campaign: &[u8]) -> Option<u16> {
+        match ids::try_encode(campaign) {
+            Some(k) => self.campaigns.get(&k),
+            None => self.campaigns_other.get(campaign),
+        }
+        .copied()
     }
 }
 
@@ -87,25 +117,39 @@ fn build_ctx(data: &Path) -> Ctx {
     names.dedup();
     let cat_id = |n: &[u8]| names.binary_search_by(|x| x.as_slice().cmp(n)).unwrap() as u16;
     let mut products = ids::key_map(prows.len());
+    let mut products_other = HashMap::new();
     for (p, c) in &prows {
-        products.entry(ids::pack(p)).or_insert(cat_id(c));
+        match ids::try_encode(p) {
+            Some(k) => {
+                products.entry(k).or_insert(cat_id(c));
+            }
+            None => {
+                products_other.entry(p.clone()).or_insert(cat_id(c));
+            }
+        }
     }
     let unknown_cat = cat_id(b"unknown");
 
     let crows = two_col_rows(&data.join("campaigns.csv"));
     let mut campaigns = ids::key_map(crows.len());
+    let mut campaigns_other: HashMap<Vec<u8>, u16> = HashMap::new();
     let mut campaign_names = Vec::new();
     let mut channels = Vec::new();
     for (c, ch) in crows {
-        let k = ids::pack(&c);
-        if campaigns.contains_key(&k) {
+        let id = campaign_names.len() as u16;
+        let fresh = match ids::try_encode(&c) {
+            Some(k) => campaigns.try_insert_new(k, id),
+            None => campaigns_other.try_insert_new(c.clone(), id),
+        };
+        if !fresh {
             continue;
         }
-        campaigns.insert(k, campaign_names.len() as u16);
         campaign_names.push(c);
         channels.push(ch);
     }
-    Ctx { window_start, window_end, products, unknown_cat, categories: names, campaigns, campaign_names, channels }
+    // Ev::ts is a u32 offset from window_start (ADR-023).
+    assert!(window_end - window_start <= u32::MAX as i64, "window longer than 49 days");
+    Ctx { window_start, window_end, products, products_other, unknown_cat, categories: names, campaigns, campaigns_other, campaign_names, channels }
 }
 
 fn main() {
@@ -147,7 +191,7 @@ fn main() {
     let first_day = ctx.window_start.div_euclid(ts::MS_PER_DAY);
     let ndays = ((ctx.window_end - 1).div_euclid(ts::MS_PER_DAY) - first_day + 1) as usize;
     let ncamp = ctx.campaign_names.len();
-    let totals = partition::run(&ev, &ck, ctx.categories.len(), ncamp, first_day, ndays);
+    let totals = partition::run(&ev, &ck, ctx.categories.len(), ncamp, first_day, ndays, ctx.window_start);
     // Don't free the routed events and clicks: the OS reclaims all memory at exit
     // in one step, which is much faster than freeing it piece by piece (ADR-020).
     std::mem::forget((ev, ck));

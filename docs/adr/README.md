@@ -27,6 +27,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [020](020-partitioned-pipeline.md) | Partitioned pipeline: dedup by event_id bucket, then work per person partition | Accepted (branch `partitioned`) |
 | [021](021-linux-profiling.md) | Profile on Linux with perf in Docker | Accepted |
 | [022](022-huge-pages.md) | Ask mimalloc for huge OS pages (`MIMALLOC_ALLOW_LARGE_OS_PAGES=1`) | Accepted (branch `partitioned`); to be scored |
+| [023](023-u64-ids-u32-times.md) | 64-bit base-37 IDs and 32-bit event times | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -114,3 +115,5 @@ One line per commit, newest last.
   THP already `always` in Docker's VM.
 - 2026-11-21: ADR-022: run.sh sets MIMALLOC_ALLOW_LARGE_OS_PAGES=1; only run.sh differs from main's code (clean A/B).
 - 2026-11-21: CLAUDE.md: heavy work (benchmarks, tests, generation, Docker) moves off the laptop to a cloud VM.
+- 2026-11-21: ADR-023: u64 base-37 IDs (escape bit for others), u32 event times; RawEv 40 B, Ev 24 B.
+  check.sh builds with -j 2 to stay light on the laptop.

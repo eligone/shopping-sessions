@@ -19,12 +19,12 @@ step() {
 }
 
 echo "== build"
-step nice -n 10 cargo build --release -j 4
+step nice -n 10 cargo build --release -j 2
 grep -E "^warning" "$LOG" || true
 echo "ok"
 
 echo "== unit tests"
-step nice -n 10 cargo test --release -j 4
+step nice -n 10 cargo test --release -j 2
 grep -E "test result" "$LOG"
 
 for mode in pread mmap; do

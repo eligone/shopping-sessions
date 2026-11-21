@@ -17,12 +17,11 @@ const NO_PRODUCT: u16 = u16::MAX;
 const MAX_PRICE: u32 = 10_000_000;
 
 /// One parsed copy of an event. Validity is decided here, per copy, because the
-/// rules validate whichever copy wins dedup (ADR-015). IDs are stored as two
-/// u64 halves so the struct is 8-byte aligned: 56 bytes instead of 64.
+/// rules validate whichever copy wins dedup (ADR-015). 40 bytes (ADR-023).
 #[derive(Clone, Copy)]
 struct RawEv {
-    eid: [u64; 2],
-    user: [u64; 2],
+    eid: Key,
+    user: Key, // 0 = null (a non-empty ID's key is never 0)
     ingest: i64, // dedup order: smallest wins
     ts: i64,
     price: u32,  // purchase price (0 for view / cart)
@@ -31,21 +30,12 @@ struct RawEv {
     valid: bool, // passes every rule check, including "not late"
 }
 
-#[inline]
-fn split(k: Key) -> [u64; 2] {
-    [k as u64, (k >> 64) as u64]
-}
-
-#[inline]
-fn join(k: [u64; 2]) -> Key {
-    k[0] as u128 | ((k[1] as u128) << 64)
-}
-
-/// A surviving event.
+/// A surviving event: 24 bytes (ADR-023). `ts` is milliseconds since window_start,
+/// which fits in 32 bits for any window under 49 days (checked in main).
 #[derive(Clone, Copy)]
 pub struct Ev {
     pub person: Key,
-    pub ts: i64,
+    pub ts: u32,
     pub price: u32, // purchase price, 0 for view / cart
     pub cat: u16,
     pub etype: u8,
@@ -99,7 +89,7 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
         let price = if etype == PURCHASE { parse_price(f[6]) } else { 0 };
         let cat = match f[5] {
             None => NO_PRODUCT,
-            Some(p) => ctx.category_of(ids::pack(p)),
+            Some(p) => ctx.category_of(p),
         };
         let valid = f[1].is_some()
             && ts != BAD_TS
@@ -110,8 +100,8 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
             && (etype != PURCHASE || price != 0)
             && ingest.saturating_sub(ts) <= ts::MS_PER_DAY;
         let r = RawEv {
-            eid: split(eid),
-            user: split(f[1].map_or(0, ids::pack)),
+            eid,
+            user: f[1].map_or(0, ids::pack),
             ingest,
             ts,
             price,
@@ -132,6 +122,7 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
     eprintln!("    events parse   {:.3}s", t0.elapsed().as_secs_f64());
     let t1 = std::time::Instant::now();
     let parts = crate::partition::PARTS;
+    let ws = ctx.window_start;
 
     // Per eid bucket: dedup by location (ADR-015), then route the valid winners.
     let routed: Vec<Vec<Vec<Ev>>> = (0..BUCKETS)
@@ -142,7 +133,7 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
             for (ci, p) in parsed.iter().enumerate() {
                 for (pos, r) in p[bi].iter().enumerate() {
                     let here = (ci as u64) << 32 | pos as u64;
-                    best.entry(join(r.eid))
+                    best.entry(r.eid)
                         .and_modify(|loc| {
                             let cur = &parsed[(*loc >> 32) as usize][bi][(*loc & 0xFFFF_FFFF) as usize];
                             if r.ingest < cur.ingest {
@@ -161,11 +152,11 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
             let mut out: Vec<Vec<Ev>> = (0..parts).map(|_| Vec::with_capacity(est)).collect();
             for &loc in &w {
                 let r = &parsed[(loc >> 32) as usize][bi][(loc & 0xFFFF_FFFF) as usize];
-                let user = join(r.user);
+                let user = r.user;
                 let person = persons.get(&user).copied().unwrap_or(user);
                 out[crate::partition::bucket(person)].push(Ev {
                     person,
-                    ts: r.ts,
+                    ts: (r.ts - ws) as u32,
                     price: r.price,
                     cat: r.cat,
                     etype: r.etype,
@@ -183,8 +174,8 @@ mod tests {
     #[test]
     fn record_sizes() {
         // ADR-015: keep the per-line record small; it is written once per input line.
-        assert_eq!(std::mem::size_of::<super::RawEv>(), 56);
-        assert_eq!(std::mem::size_of::<super::Ev>(), 32);
+        assert_eq!(std::mem::size_of::<super::RawEv>(), 40);
+        assert_eq!(std::mem::size_of::<super::Ev>(), 24);
     }
 }
 
@@ -233,7 +224,7 @@ pub fn parse_bench(src: &crate::input::Source, ctx: &Ctx) {
                     }
                     let eid = f[0].map_or(0, ids::pack);
                     let user = f[1].map_or(0, ids::pack);
-                    let cat = f[5].map_or(NO_PRODUCT, |p| ctx.category_of(ids::pack(p)));
+                    let cat = f[5].map_or(NO_PRODUCT, |p| ctx.category_of(p));
                     acc = acc.wrapping_add(eid as u64 ^ user as u64 ^ cat as u64);
                     if v == 4 {
                         continue;

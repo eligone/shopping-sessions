@@ -34,7 +34,7 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &KeyMap<Key>) -> Vec
             let (Some(cid), Some(user), Some(camp), Some(t)) = (f[0], f[1], f[2], f[3]) else {
                 continue;
             };
-            let Some(camp) = ctx.campaign_of(ids::pack(camp)) else { continue };
+            let Some(camp) = ctx.campaign_of(camp) else { continue };
             let Some(t) = ts::parse_ts(t) else { continue };
             if t < lo || t >= hi {
                 continue;
