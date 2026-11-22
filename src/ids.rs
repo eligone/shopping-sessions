@@ -16,6 +16,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AO};
 use std::sync::{Mutex, OnceLock};
 
 pub type Key = u64;
@@ -103,8 +104,146 @@ pub fn try_encode(b: &[u8]) -> Option<Key> {
 pub fn pack(b: &[u8]) -> Key {
     match try_encode(b) {
         Some(k) => k,
-        None => pack_escaped(b),
+        None => {
+            if let Some(w) = try_hex_shape(b) {
+                if let Some(k) = hex_key(w) {
+                    return k;
+                }
+            }
+            pack_escaped(b)
+        }
     }
+}
+
+// ---- Lock-free table for the long hex shape (ADR-047) ----
+//
+// An ID of exactly `[a-z]` + 32 lowercase hex digits is stored as (tag, hi, lo) in
+// one slot of a fixed open-addressing table, and its key is ESC | HEXK | slot. No
+// lock and no byte arena: one probe, usually one cache miss.
+//
+// Exactness: every ID gets exactly one key. Along an ID's probe sequence, slots
+// only ever change empty -> claimed -> ready, or empty -> sealed. The first slot that
+// is not ready and holding another ID decides the ID's fate, and only one thread can
+// win the compare-and-swap on that slot. If it is claimed for the ID, the ID lives
+// there (other threads wait for it to be ready and see it). If it is sealed (the
+// table passed half full), the ID is not in the table and never will be, so every
+// thread sends it to the interner.
+
+const HEXK: u64 = 1 << 62; // interner keys use bits 0..42 only
+const META_EMPTY: u64 = 0;
+const META_CLAIMED: u64 = 1;
+const META_SEALED: u64 = 2;
+const META_READY: u64 = 3; // | tag << 8
+
+#[derive(Default)]
+struct HexSlot {
+    hi: AtomicU64,
+    lo: AtomicU64,
+    meta: AtomicU64,
+}
+
+struct HexTable {
+    slots: Vec<HexSlot>,
+    mask: usize,
+    used: AtomicUsize,
+    limit: usize,
+}
+
+static HEXTAB: OnceLock<HexTable> = OnceLock::new();
+
+/// Create the table with room for about `expected` long IDs. Call once, before
+/// any ID is packed; without it, the first hex ID creates a default-size table.
+pub fn init_hex(expected: usize) {
+    let _ = HEXTAB.set(HexTable::new(expected));
+}
+
+fn hex_table() -> &'static HexTable {
+    HEXTAB.get_or_init(|| HexTable::new(1 << 16))
+}
+
+impl HexTable {
+    fn new(expected: usize) -> HexTable {
+        let cap = (expected.max(16) * 2).next_power_of_two();
+    // All-zero memory is a valid table of empty slots; the allocator hands out
+    // zeroed pages lazily.
+    let slots: Vec<HexSlot> = unsafe {
+        let layout = std::alloc::Layout::array::<HexSlot>(cap).unwrap();
+        let p = std::alloc::alloc_zeroed(layout) as *mut HexSlot;
+        assert!(!p.is_null(), "hex table allocation");
+        Vec::from_raw_parts(p, cap, cap)
+    };
+        HexTable { slots, mask: cap - 1, used: AtomicUsize::new(0), limit: cap / 2 }
+    }
+}
+
+/// Key of a hex-shaped ID, or None if it must go to the interner.
+#[inline]
+fn hex_key(w: Wide) -> Option<Key> {
+    hex_key_in(hex_table(), w)
+}
+
+#[inline]
+fn hex_key_in(t: &HexTable, w: Wide) -> Option<Key> {
+    let ready = META_READY | (w.tag as u64) << 8;
+    let mut i = (w.mix() as usize) & t.mask;
+    loop {
+        let s = &t.slots[i];
+        let mut m = s.meta.load(AO::Acquire);
+        if m == META_EMPTY {
+            let full = t.used.load(AO::Relaxed) >= t.limit;
+            let to = if full { META_SEALED } else { META_CLAIMED };
+            match s.meta.compare_exchange(META_EMPTY, to, AO::AcqRel, AO::Acquire) {
+                Ok(_) if to == META_CLAIMED => {
+                    s.hi.store(w.hi, AO::Relaxed);
+                    s.lo.store(w.lo, AO::Relaxed);
+                    s.meta.store(ready, AO::Release);
+                    t.used.fetch_add(1, AO::Relaxed);
+                    return Some(ESC | HEXK | i as u64);
+                }
+                Ok(_) => return None, // sealed by us
+                Err(cur) => m = cur,
+            }
+        }
+        while m == META_CLAIMED {
+            std::hint::spin_loop();
+            m = s.meta.load(AO::Acquire);
+        }
+        if m == META_SEALED {
+            return None;
+        }
+        if m == ready && s.hi.load(AO::Relaxed) == w.hi && s.lo.load(AO::Relaxed) == w.lo {
+            return Some(ESC | HEXK | i as u64);
+        }
+        i = (i + 1) & t.mask;
+    }
+}
+
+#[inline]
+fn is_hex_key(k: Key) -> bool {
+    k & (ESC | HEXK) == ESC | HEXK
+}
+
+/// (tag, hi, lo) of a hex key. Its order equals the IDs' byte order: the letter
+/// first, then 32 lowercase hex digits, whose ASCII order is their numeric order.
+#[inline]
+fn hex_parts(k: Key) -> (u8, u64, u64) {
+    let t = hex_table();
+    let s = &t.slots[(k & !(ESC | HEXK)) as usize];
+    let m = s.meta.load(AO::Acquire);
+    ((m >> 8) as u8, s.hi.load(AO::Relaxed), s.lo.load(AO::Relaxed))
+}
+
+#[inline]
+fn hex_bytes(k: Key) -> [u8; 33] {
+    const D: &[u8; 16] = b"0123456789abcdef";
+    let (tag, hi, lo) = hex_parts(k);
+    let mut out = [0u8; 33];
+    out[0] = b'a' + tag - 1;
+    for i in 0..16 {
+        out[1 + i] = D[(hi >> (60 - 4 * i) & 15) as usize];
+        out[17 + i] = D[(lo >> (60 - 4 * i) & 15) as usize];
+    }
+    out
 }
 
 /// Same as `pack`; kept as a separate name for click_id call sites.
@@ -163,6 +302,9 @@ fn decode_short(k: Key) -> ([u8; PLACES], usize) {
 /// Run `f` on an escaped ID's bytes under its shard's lock (one lock, no copy).
 #[inline]
 fn with_escaped<R>(k: Key, f: impl FnOnce(&[u8]) -> R) -> R {
+    if is_hex_key(k) {
+        return f(&hex_bytes(k));
+    }
     let sh = shards()[((k >> 32) as usize) & (SHARDS - 1)].lock().unwrap();
     let (start, len) = sh.spans[k as u32 as usize];
     f(&sh.arena[start as usize..(start + len) as usize])
@@ -205,6 +347,7 @@ pub fn cmp_ids(a: Key, b: Key) -> Ordering {
             let (buf, n) = decode_short(b);
             with_escaped(a, |ab| ab.cmp(&buf[..n]))
         }
+        (true, true) if is_hex_key(a) && is_hex_key(b) => hex_parts(a).cmp(&hex_parts(b)),
         (true, true) => {
             let av = unpack(a); // copied, so its lock is released before b's is taken
             with_escaped(b, |bb| av.as_slice().cmp(bb))
@@ -380,6 +523,100 @@ mod tests {
     }
 
     /// Many threads interning overlapping long IDs at once must agree on every key.
+    #[test]
+    fn hex_table_concurrent_and_sealing_is_exact() {
+        // Tiny tables, so they pass half full and start sealing while 8 threads
+        // race on the same IDs: every ID must get the same answer in every thread,
+        // distinct IDs distinct keys, and stored parts must round-trip.
+        for (round, cap) in [8usize, 64, 1000, 5000].into_iter().enumerate() {
+            let t = HexTable::new(cap);
+            let mut seed: u64 = 0x9E37_79B9 + round as u64;
+            let ids: Vec<Wide> = (0..4000)
+                .map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    let small = seed % 3 == 0; // many near-equal values
+                    Wide { hi: if small { seed % 4 } else { seed }, lo: seed.rotate_left(17) % if small { 8 } else { u64::MAX }, tag: 1 + (seed % 26) as u8 }
+                })
+                .collect();
+            let results: Vec<Vec<Option<Key>>> = std::thread::scope(|sc| {
+                let hs: Vec<_> = (0..8)
+                    .map(|th| {
+                        let (t, ids) = (&t, &ids);
+                        sc.spawn(move || {
+                            // Each thread visits every ID once, in its own order (the
+                            // multipliers are coprime with n = 4000, so this is a permutation).
+                            let n = ids.len();
+                            let mul = [1usize, 3, 7, 9, 11, 13, 17, 19][th];
+                            let mut v = vec![None; n];
+                            let mut seen = vec![false; n];
+                            for j in 0..n {
+                                let x = (j * mul + th * 97) % n;
+                                assert!(!seen[x]);
+                                seen[x] = true;
+                                v[x] = hex_key_in(t, ids[x]);
+                            }
+                            v
+                        })
+                    })
+                    .collect();
+                hs.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+            let mut by_key: std::collections::HashMap<Key, Wide> = std::collections::HashMap::new();
+            for (j, w) in ids.iter().enumerate() {
+                let first = results[0][j];
+                for r in &results {
+                    assert_eq!(r[j], first, "threads disagree on {w:?}");
+                }
+                if let Some(k) = first {
+                    let i = (k & !(ESC | HEXK)) as usize;
+                    let m = t.slots[i].meta.load(AO::Acquire);
+                    assert_eq!(((m >> 8) as u8, t.slots[i].hi.load(AO::Relaxed), t.slots[i].lo.load(AO::Relaxed)), (w.tag, w.hi, w.lo));
+                    if let Some(prev) = by_key.insert(k, *w) {
+                        assert_eq!(prev, *w, "two IDs share a key");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Hex keys from the global table: bytes round-trip and order is byte-wise
+    /// against short, escaped and other hex IDs.
+    #[test]
+    fn hex_keys_roundtrip_and_order() {
+        let mut ids: Vec<Vec<u8>> = vec![
+            b"a00000000000000000000000000000000".to_vec(),
+            b"affffffffffffffffffffffffffffffff".to_vec(),
+            b"u0123456789abcdef0123456789abcdef".to_vec(),
+            b"u0123456789abcdef0123456789abcdee".to_vec(),
+            b"z0000000000000001000000000000000f".to_vec(),
+            b"u0123456789ABCDEF0123456789abcdef".to_vec(), // upper case: interner
+            b"u0123456789abcdef0123456789abcdef0".to_vec(), // 34 chars: interner
+            b"u".to_vec(),
+            b"u1".to_vec(),
+            b"zzzzzzzzzzzz".to_vec(),
+            b"b".to_vec(),
+        ];
+        let mut seed: u64 = 0xA076_1D64_78BD_642F;
+        for _ in 0..300 {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            ids.push(format!("{}{:016x}{:016x}", (b'a' + (seed % 3) as u8) as char, seed % 5, seed).into_bytes());
+        }
+        let keys: Vec<Key> = ids.iter().map(|b| pack(b)).collect();
+        for (b, &k) in ids.iter().zip(&keys) {
+            assert_eq!(&unpack(k), b);
+            assert_eq!(pack(b), k);
+        }
+        for (a, &ka) in ids.iter().zip(&keys) {
+            for (b, &kb) in ids.iter().zip(&keys) {
+                assert_eq!(cmp_ids(ka, kb), a.cmp(b), "{:?} vs {:?}", String::from_utf8_lossy(a), String::from_utf8_lossy(b));
+            }
+        }
+    }
+
     #[test]
     fn concurrent_interning_is_consistent() {
         let ids: Vec<Vec<u8>> = (0..20_000u32)

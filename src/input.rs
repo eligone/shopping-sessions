@@ -105,6 +105,11 @@ impl Source {
         Source { mode, files, sizes, maps, tasks }
     }
 
+    /// Total bytes of all files.
+    pub fn total_bytes(&self) -> u64 {
+        self.sizes.iter().sum()
+    }
+
     /// Run `f` on every task's lines in parallel; results in task order.
     pub fn par_map<R: Send>(&self, f: impl Fn(&[u8]) -> R + Sync + Send) -> Vec<R> {
         self.tasks.par_iter().map(|t| self.with(t, &f)).collect()

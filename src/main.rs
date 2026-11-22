@@ -207,6 +207,8 @@ fn main() {
         input::Source::open(&input::csv_files(&data.join("clicks")), mode),
         input::Source::open(&input::csv_files(&data.join("links")), mode),
     );
+    // Lock-free table for the generator's long hex IDs (ADR-047), sized from the input.
+    ids::init_hex(((ev_src.total_bytes() + ck_src.total_bytes() + ln_src.total_bytes()) / 1024) as usize);
     lap(if mode == input::Mode::Mmap { "open (mmap)" } else { "open (pread)" });
 
     if std::env::var("SS_STAGE").as_deref() == Ok("parsebench") {
