@@ -27,9 +27,6 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &FlatMap<Key>) -> Ve
     src.par_map(|c| {
         let est = c.len() / 45 / parts + 4;
         let mut out: Vec<Vec<Click>> = (0..parts).map(|_| Vec::with_capacity(est)).collect();
-        // Parse first (person = user for now), then map users to persons with the
-        // table slot prefetched a few records ahead (ADR-043).
-        let mut tmp: Vec<Click> = Vec::with_capacity(c.len() / 45 + 4);
         csv::for_each_line::<4>(c, |f| {
             let (Some(cid), Some(user), Some(camp), Some(t)) = (f[0], f[1], f[2], f[3]) else {
                 return;
@@ -39,16 +36,10 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &FlatMap<Key>) -> Ve
             if t < lo || t >= hi {
                 return;
             }
-            tmp.push(Click { person: ids::pack(user), cid: ids::pack_once(cid), ts: t, camp });
+            let user = ids::pack(user);
+            let person = persons.get(user).unwrap_or(user);
+            out[crate::partition::bucket(person)].push(Click { person, cid: ids::pack_once(cid), ts: t, camp });
         });
-        const AHEAD: usize = 16;
-        for (i, k) in tmp.iter().enumerate() {
-            if let Some(a) = tmp.get(i + AHEAD) {
-                persons.prefetch(a.person);
-            }
-            let person = persons.get(k.person).unwrap_or(k.person);
-            out[crate::partition::bucket(person)].push(Click { person, ..*k });
-        }
         out
     })
 }

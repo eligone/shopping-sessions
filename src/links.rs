@@ -76,16 +76,9 @@ pub fn persons(edges: Vec<(Key, Key)>) -> FlatMap<Key> {
             has[r] = true;
         }
     }
-    // Only IDs whose person differs from themselves are stored (ADR-043): every
-    // lookup falls back to the ID itself on a miss, so identity entries are
-    // redundant, and a smaller table stays hotter in cache during routing.
-    let moved = (0..n).filter(|&i| keys[i] != name[root[i] as usize]).count();
-    let mut out: FlatMap<Key> = FlatMap::with_capacity(moved * 2 / 3 + 1);
+    let mut out: FlatMap<Key> = FlatMap::with_capacity(n);
     for i in 0..n {
-        let to = name[root[i] as usize];
-        if keys[i] != to {
-            out.insert_new(keys[i], to);
-        }
+        out.insert_new(keys[i], name[root[i] as usize]);
     }
     eprintln!("    links dsu+map  {:.3}s ({} ids)", t1.elapsed().as_secs_f64(), n);
     out

@@ -1,6 +1,6 @@
 # ADR-043: Persons map without identity entries; prefetch in the clicks lookup
 
-**Status:** Accepted (branch `lowlevel`)
+**Status:** Rejected (reverted 2026-11-22 after the scorer measured 2.02 s against 1.68 s for `40c07ee`)
 **Date:** 2026-11-22
 
 ## Context
@@ -27,3 +27,10 @@ entries returned. Routing and all other values are unchanged.
 | ADR-042 (`40c07ee`) | 2.136 s |
 | ADR-043 | 2.116 s |
 Faster in every run. `scripts/check.sh full`: all checks passed.
+
+## Outcome
+Submitted as `181b845`: **scored 2.02 s**, against 1.68 s for the commit before it (`40c07ee`).
+The VM gain (0.02 s) did not carry over to the scorer, so the change is reverted. A likely
+suspect is the clicks loader's extra pass: it allocates and fills a fresh temporary vector per chunk
+(page faults and extra memory traffic) before routing. Lesson: a VM gain this small is within
+what the scorer's machine can reverse; treat VM gains under about 0.05 s as unproven.

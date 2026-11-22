@@ -47,7 +47,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [040](040-fingerprint-dedup.md) | Cache-sized dedup table with 8-byte fingerprint slots | Accepted (branch `lowlevel`) |
 | [041](041-links-first.md) | Parse links first on all threads; union-find alongside the events parse | Accepted (branch `lowlevel`) |
 | [042](042-counting-sort-partitions.md) | Group each partition by person with a counting sort | Accepted (branch `lowlevel`) |
-| [043](043-smaller-persons-map.md) | Persons map without identity entries; prefetch in clicks | Accepted (branch `lowlevel`) |
+| [043](043-smaller-persons-map.md) | Persons map without identity entries; prefetch in clicks | Rejected (scored 2.02 s vs 1.68 s) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -105,6 +105,7 @@ Score is run time from container start to exit, lower is better.
 - **Sixteenth submission (`562df83`, ADR-040 fingerprint dedup): scored 1.95 s**.
 - **Seventeenth submission (`40c07ee`, ADR-041 links first + ADR-042 counting sort): scored 1.68 s**, best so far.
   The VM measured 2.151 s, so the scorer was about 22% faster than the VM.
+- **Eighteenth submission (`181b845`, ADR-043): scored 2.02 s**, slower than 1.68 s; ADR-043 reverted.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -202,3 +203,4 @@ One line per commit, newest last.
 - 2026-11-22: ADR-042: counting-sort grouping per partition (no gather copy); -0.08 s on the VM.
 - 2026-11-22: `40c07ee` scored 1.68 s (from 1.95 s).
 - 2026-11-22: ADR-043: persons map holds only IDs that map to someone else; clicks prefetch the map slot; -0.02 s on the VM.
+- 2026-11-22: `181b845` scored 2.02 s; ADR-043 reverted (code back to `40c07ee`).
