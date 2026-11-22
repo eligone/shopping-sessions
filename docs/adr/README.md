@@ -53,6 +53,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [046](046-rawev-44-bytes.md) | 44-byte parsed event records | Accepted (branch `lowlevel`) |
 | [047](047-lockfree-hex-ids.md) | Lock-free table for long hex IDs | Accepted (branch `lowlevel`) |
 | [048](048-free-raw-buckets-early.md) | Free each event bucket's parsed copies once routed | Accepted (branch `lowlevel`) |
+| [049](049-mimalloc-no-purge.md) | Keep freed memory in the allocator (`MIMALLOC_PURGE_DELAY=-1`) | Accepted (branch `lowlevel`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -215,3 +216,4 @@ One line per commit, newest last.
 - 2026-11-22: ADR-047: lock-free table for long hex user/click IDs; -0.078 s on the VM (2.009 -> 1.931 s).
 - 2026-11-22: `654aef4` scored 1.63 s. A no-huge-pages simulation (THP never) adds 0.67 s and 800k page faults on the VM, so changes are now benchmarked in both THP modes.
 - 2026-11-22: ADR-048: free each event bucket's parsed copies once routed; -0.05 to -0.07 s without huge pages, neutral with them.
+- 2026-11-22: ADR-049: `run.sh` sets `MIMALLOC_PURGE_DELAY=-1`; -0.05 s with huge pages, -0.02 s without. Reading with pread instead of mmap was slower in both modes.
