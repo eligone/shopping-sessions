@@ -33,6 +33,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [026](026-links-alongside-parse.md) | Resolve links while events are parsed | Accepted (branch `partitioned`) |
 | [027](027-winner-bitset.md) | Mark dedup winners in a bitset instead of sorting their locations | Accepted (branch `partitioned`) |
 | [028](028-paired-slots-prefetch.md) | FlatMap slots hold key and value together; prefetch upcoming lookups | Accepted (branch `partitioned`) |
+| [029](029-sharded-interner.md) | Shard the escaped-ID interner for the generator's long IDs | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -74,6 +75,9 @@ Score is run time from container start to exit, lower is better.
 - **Ninth submission (`87780b9`, batch ADR-026/027/028): scored 6.63 s** (Sun 12:01 AM). The leaderboard top
   also moved from 0.28 s to 0.51 s, so the scorer itself appears slower (about 1.8x); the batch may also have
   regressed. Next: resubmit `c203fa6` unchanged to measure the drift. Rules now say 2 submissions an hour.
+- **Tenth submission (`c203fa6` resubmitted): 6.94 s.** So the batch is about 5% faster, and the data changed:
+  rules.md now says 1 in 8 IDs carries a 32-char hex suffix. Our single-lock escaped-ID table was the
+  bottleneck (ADR-029).
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -141,3 +145,5 @@ One line per commit, newest last.
   Batch for one submission: ADR-026, 027, 028.
 - 2026-11-22: batch `87780b9` scored 6.63 s; leaderboard top 0.28 -> 0.51 s. Plan: resubmit `c203fa6` to separate
   scorer drift from a regression before bisecting ADR-026/027/028.
+- 2026-11-22: rules.md update (long hex-suffixed IDs) found; ADR-029 sharded interner, 2.2-2.5x faster on
+  simulated long-ID data, matches DuckDB.

@@ -8,8 +8,11 @@
 //! integers is the same as comparing the IDs byte-wise.
 //!
 //! Any other ID (upper case, spaces, punctuation, multi-byte UTF-8, more than 12
-//! bytes) is interned in a shared table and gets the top bit set ("escaped");
-//! `cmp_ids` compares those by their bytes.
+//! bytes, such as the generator's IDs with a 32-character hex suffix, 1 in 8 of
+//! all IDs) is interned and gets the top bit set ("escaped"); `cmp_ids` compares
+//! those by their bytes. The interner is sharded 1024 ways by a hash of the bytes,
+//! each shard behind its own lock with its own byte arena, so threads rarely
+//! wait for each other (ADR-029).
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -19,10 +22,33 @@ pub type Key = u64;
 const ESC: u64 = 1 << 63;
 const PLACES: usize = 12;
 
-static ESCAPED: OnceLock<Mutex<(HashMap<Vec<u8>, u64>, Vec<Vec<u8>>)>> = OnceLock::new();
+const SHARD_BITS: u32 = 10;
+const SHARDS: usize = 1 << SHARD_BITS;
 
-fn escaped_table() -> &'static Mutex<(HashMap<Vec<u8>, u64>, Vec<Vec<u8>>)> {
-    ESCAPED.get_or_init(|| Mutex::new((HashMap::new(), Vec::new())))
+/// One shard of the escaped-ID interner: IDs' bytes back to back in `arena`,
+/// `spans[i]` = (start, len) of ID i, and a hash index with collision chains.
+#[derive(Default)]
+struct Shard {
+    arena: Vec<u8>,
+    spans: Vec<(u32, u32)>,
+    next: Vec<u32>,             // next ID in the same hash chain, u32::MAX = end
+    heads: HashMap<u64, u32>,   // full hash -> first ID with that hash
+}
+
+static INTERNER: OnceLock<Vec<Mutex<Shard>>> = OnceLock::new();
+static HASHER: OnceLock<ahash::RandomState> = OnceLock::new();
+
+fn shards() -> &'static [Mutex<Shard>] {
+    INTERNER.get_or_init(|| (0..SHARDS).map(|_| Mutex::new(Shard::default())).collect())
+}
+
+#[inline]
+fn hash_bytes(b: &[u8]) -> u64 {
+    // Fixed seeds: the hash only places IDs in shards and chains; equality is
+    // always decided by comparing bytes.
+    HASHER
+        .get_or_init(|| ahash::RandomState::with_seeds(0x243F_6A88, 0x85A3_08D3, 0x1319_8A2E, 0x0370_7344))
+        .hash_one(b)
 }
 
 #[inline]
@@ -63,15 +89,25 @@ pub fn pack(b: &[u8]) -> Key {
     }
 }
 
-#[cold]
 fn pack_escaped(b: &[u8]) -> Key {
-    let mut t = escaped_table().lock().unwrap();
-    let next = t.1.len() as u64;
-    let idx = *t.0.entry(b.to_vec()).or_insert(next);
-    if idx == next {
-        t.1.push(b.to_vec());
+    let h = hash_bytes(b);
+    let s = (h as usize) & (SHARDS - 1);
+    let mut sh = shards()[s].lock().unwrap();
+    let mut i = sh.heads.get(&h).copied().unwrap_or(u32::MAX);
+    while i != u32::MAX {
+        let (start, len) = sh.spans[i as usize];
+        if &sh.arena[start as usize..(start + len) as usize] == b {
+            return ESC | (s as u64) << 32 | i as u64;
+        }
+        i = sh.next[i as usize];
     }
-    ESC | idx
+    let id = sh.spans.len() as u32;
+    let start = sh.arena.len() as u32;
+    sh.arena.extend_from_slice(b);
+    sh.spans.push((start, b.len() as u32));
+    let head = sh.heads.insert(h, id).unwrap_or(u32::MAX);
+    sh.next.push(head);
+    ESC | (s as u64) << 32 | id as u64
 }
 
 #[inline]
@@ -82,8 +118,9 @@ pub fn is_escaped(k: Key) -> bool {
 /// The ID's bytes.
 pub fn unpack(k: Key) -> Vec<u8> {
     if is_escaped(k) {
-        let t = escaped_table().lock().unwrap();
-        return t.1[(k & !ESC) as usize].clone();
+        let sh = shards()[((k >> 32) as usize) & (SHARDS - 1)].lock().unwrap();
+        let (start, len) = sh.spans[k as u32 as usize];
+        return sh.arena[start as usize..(start + len) as usize].to_vec();
     }
     let mut digits = [0u8; PLACES];
     let mut v = k;
@@ -174,7 +211,8 @@ mod tests {
         };
         let mut ids: Vec<Vec<u8>> = Vec::new();
         for i in 0..3000 {
-            let len = 1 + (next() % 14) as usize;
+            // Lengths up to 14, and every 5th ID 41 bytes like the generator's hex-suffixed IDs.
+            let len = if i % 5 == 0 { 41 } else { 1 + (next() % 14) as usize };
             let pure = i % 3 != 0; // mostly encodable
             let id: Vec<u8> = (0..len)
                 .map(|_| {
@@ -185,11 +223,42 @@ mod tests {
             ids.push(id);
         }
         let keys: Vec<Key> = ids.iter().map(|x| pack(x)).collect();
+        // Packing again gives the same keys.
+        for (x, &k) in ids.iter().zip(&keys) {
+            assert_eq!(pack(x), k);
+        }
         for i in 0..ids.len() {
             assert_eq!(unpack(keys[i]), ids[i]);
             for j in (0..ids.len()).step_by(7) {
                 assert_eq!(cmp_ids(keys[i], keys[j]), ids[i].cmp(&ids[j]));
                 assert_eq!(keys[i] == keys[j], ids[i] == ids[j]);
+            }
+        }
+    }
+
+    /// Many threads interning overlapping long IDs at once must agree on every key.
+    #[test]
+    fn concurrent_interning_is_consistent() {
+        let ids: Vec<Vec<u8>> = (0..20_000u32)
+            .map(|i| format!("u{:x}{:032x}", i % 5_000, (i as u128).wrapping_mul(0x9E37_79B9_7F4A_7C15_F39C)).into_bytes())
+            .collect();
+        let results: Vec<Vec<Key>> = std::thread::scope(|s| {
+            let hs: Vec<_> = (0..8)
+                .map(|t| {
+                    let ids = &ids;
+                    s.spawn(move || {
+                        // Each thread walks the IDs from a different starting point.
+                        (0..ids.len()).map(|j| pack(&ids[(j + t * 2_500) % ids.len()])).collect::<Vec<Key>>()
+                    })
+                })
+                .collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for (t, keys) in results.iter().enumerate() {
+            for (j, &k) in keys.iter().enumerate() {
+                let id = &ids[(j + t * 2_500) % ids.len()];
+                assert_eq!(k, pack(id));
+                assert_eq!(&unpack(k), id);
             }
         }
     }
