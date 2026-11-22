@@ -240,14 +240,35 @@ fn main() {
     let parts = threads.max(1);
     let per = user_days.len().div_ceil(parts).max(1);
     let slices: Vec<&[sessions::UserDay]> = if user_days.is_empty() { vec![&user_days[..]] } else { user_days.chunks(per).collect() };
+    // Category names as shared byte buffers, built once (cloning one is a refcount bump).
+    let cat_names: Vec<ByteArray> = ctx.categories.iter().map(|c| ByteArray::from(bytes::Bytes::from(c.clone()))).collect();
     slices.par_iter().enumerate().for_each(|(i, rows)| {
+        // All user_id strings of this file back to back in one buffer; each row gets a
+        // slice of it. A person's rows are adjacent, so each name is unpacked once (ADR-036).
+        let mut buf: Vec<u8> = Vec::with_capacity(rows.len() * 12);
+        let mut spans: Vec<(usize, usize)> = Vec::with_capacity(rows.len());
+        let mut prev: Option<(ids::Key, usize, usize)> = None;
+        for r in rows.iter() {
+            let span = match prev {
+                Some((k, s, e)) if k == r.person => (s, e),
+                _ => {
+                    let s = buf.len();
+                    ids::append_bytes(r.person, &mut buf);
+                    let e = buf.len();
+                    prev = Some((r.person, s, e));
+                    (s, e)
+                }
+            };
+            spans.push(span);
+        }
+        let shared = bytes::Bytes::from(buf);
         let cols = vec![
-            Col::Str(rows.iter().map(|r| ByteArray::from(ids::unpack(r.person))).collect()),
+            Col::Str(spans.iter().map(|&(s, e)| ByteArray::from(shared.slice(s..e))).collect()),
             Col::Date(rows.iter().map(|r| r.day).collect()),
             Col::I64(rows.iter().map(|r| r.sessions as i64).collect()),
             Col::I64(rows.iter().map(|r| r.events as i64).collect()),
             Col::I64(rows.iter().map(|r| r.revenue as i64).collect()),
-            Col::OptStr(rows.iter().map(|r| r.top.map(|c| ByteArray::from(ctx.categories[c as usize].clone()))).collect()),
+            Col::OptStr(rows.iter().map(|r| r.top.map(|c| cat_names[c as usize].clone())).collect()),
         ];
         output::write(&ud_dir.join(format!("part-{i}.parquet")), output::USER_DAILY, cols).expect("write user_daily");
     });

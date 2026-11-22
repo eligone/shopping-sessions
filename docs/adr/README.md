@@ -40,6 +40,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [033](033-mmap-default.md) | Read inputs through mmap on the scorer (`SS_READ=mmap` in run.sh) | Accepted (branch `partitioned`) |
 | [034](034-parse-ablation-v2.md) | Re-measure the events parse on the new data, with the current scanner | Accepted (branch `partitioned`) |
 | [035](035-thread-cache-long-ids.md) | Per-thread cache in front of the interner for long hex-shaped IDs | Accepted (branch `partitioned`); unproven locally |
+| [036](036-shared-buffer-output.md) | Write user_daily strings from one shared buffer | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -171,3 +172,4 @@ One line per commit, newest last.
 - 2026-11-22: ADR-034: parse ablation v2 on new data (scanner 44%, user interning 17%, product lookup ~0).
 - 2026-11-22: ADR-035: thread-local cache for long hex user IDs (pack_once for click IDs). No measurable local gain.
 - 2026-11-22: ADR-035 revised: direct-mapped, L2-sized (2^15 slots) thread cache, per the scout.
+- 2026-11-22: ADR-036: user_daily strings from one shared Bytes buffer, names unpacked once; output 2x faster locally.

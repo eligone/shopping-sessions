@@ -182,6 +182,17 @@ fn with_escaped<R>(k: Key, f: impl FnOnce(&[u8]) -> R) -> R {
     f(&sh.arena[start as usize..(start + len) as usize])
 }
 
+/// Append the ID's bytes to `out` (no allocation of its own; ADR-036).
+#[inline]
+pub fn append_bytes(k: Key, out: &mut Vec<u8>) {
+    if is_escaped(k) {
+        with_escaped(k, |b| out.extend_from_slice(b));
+    } else {
+        let (buf, n) = decode_short(k);
+        out.extend_from_slice(&buf[..n]);
+    }
+}
+
 /// The ID's bytes.
 pub fn unpack(k: Key) -> Vec<u8> {
     if is_escaped(k) {

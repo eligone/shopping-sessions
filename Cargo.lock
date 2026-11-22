@@ -462,6 +462,7 @@ name = "shopping-sessions"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "bytes",
  "memmap2",
  "mimalloc",
  "parquet",

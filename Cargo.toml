@@ -15,6 +15,7 @@ memmap2 = "=0.9.5"
 ahash = { version = "=0.8.11", default-features = false, features = ["std", "runtime-rng"] }
 parquet = { version = "=55.2.0", default-features = false }
 mimalloc = { version = "=0.1.43", default-features = false }
+bytes = "=1.12.2"
 
 [profile.release]
 opt-level = 3
