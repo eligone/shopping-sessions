@@ -94,9 +94,125 @@ fn event_type(b: Option<&[u8]>) -> u8 {
     }
 }
 
+/// Software write-combining (ADR-053): records per bucket staged before a flush.
+const WC_K: usize = 16;
+
+/// Per-thread staging area: WC_K records for each of the BUCKETS buckets, reused
+/// across chunks so it stays in the core's L2 cache.
+struct Stage {
+    recs: Vec<std::mem::MaybeUninit<RawEv>>, // BUCKETS * WC_K
+    cnt: Vec<u8>,                             // records staged per bucket
+}
+
+thread_local! {
+    static STAGE: std::cell::RefCell<Stage> = std::cell::RefCell::new(Stage {
+        recs: vec![std::mem::MaybeUninit::uninit(); BUCKETS * WC_K],
+        cnt: vec![0; BUCKETS],
+    });
+}
+
+/// Append `src` to `dst`. With `nt`, through non-temporal stores, which write
+/// to memory without first reading each destination cache line (ADR-053).
+#[inline(always)]
+fn flush(dst: &mut Vec<RawEv>, src: &[std::mem::MaybeUninit<RawEv>], nt: bool) {
+    let n = src.len();
+    dst.reserve(n);
+    // SAFETY: `reserve` made room for n more records; the n staged records were written.
+    unsafe {
+        let d = dst.as_mut_ptr().add(dst.len());
+        let s = src.as_ptr() as *const RawEv;
+        if nt {
+            nt_copy(d, s, n);
+        } else {
+            std::ptr::copy_nonoverlapping(s, d, n);
+        }
+        dst.set_len(dst.len() + n);
+    }
+}
+
+/// Copy n records with 4-byte streaming stores (RawEv is 4-byte aligned, 44 bytes).
+/// The CPU combines consecutive streaming stores into whole cache-line writes.
+#[inline(always)]
+unsafe fn nt_copy(d: *mut RawEv, s: *const RawEv, n: usize) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        use std::arch::x86_64::_mm_stream_si32;
+        let words = n * std::mem::size_of::<RawEv>() / 4;
+        let (d, s) = (d as *mut i32, s as *const i32);
+        for w in 0..words {
+            _mm_stream_si32(d.add(w), s.add(w).read());
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    unsafe {
+        std::ptr::copy_nonoverlapping(s, d, n)
+    };
+}
+
+/// Write-combining mode from `SS_WC` (0 = direct push, 1 = staged + memcpy,
+/// 2 = staged + streaming stores), read once. Default 1, the fastest on the VM.
+fn wc_mode() -> u8 {
+    static M: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *M.get_or_init(|| std::env::var("SS_WC").ok().and_then(|v| v.parse().ok()).unwrap_or(1))
+}
+
 fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
+    match wc_mode() {
+        1 => parse_chunk_wc::<false>(chunk, ctx),
+        2 => parse_chunk_wc::<true>(chunk, ctx),
+        _ => {
+            let est = chunk.len() / 70 / BUCKETS + 16;
+            let mut b: Vec<Vec<RawEv>> = (0..BUCKETS).map(|_| Vec::with_capacity(est)).collect();
+            parse_lines(chunk, ctx, |bk, r| b[bk].push(r));
+            b
+        }
+    }
+}
+
+/// parse_chunk through the per-thread staging area: each record goes to its
+/// bucket's small staging slot, and a full slot is copied out in one burst.
+/// Records keep their (chunk, position) order within each bucket.
+fn parse_chunk_wc<const NT: bool>(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
     let est = chunk.len() / 70 / BUCKETS + 16;
     let mut b: Vec<Vec<RawEv>> = (0..BUCKETS).map(|_| Vec::with_capacity(est)).collect();
+    STAGE.with(|st| {
+        let st = &mut *st.borrow_mut();
+        let (recs, cnt) = (&mut st.recs[..], &mut st.cnt[..]);
+        parse_lines(chunk, ctx, |bk, r| {
+            // SAFETY: bk < BUCKETS (bucket_wide masks it) and c < WC_K.
+            unsafe {
+                let c = *cnt.get_unchecked(bk) as usize;
+                recs.get_unchecked_mut(bk * WC_K + c).write(r);
+                if c + 1 == WC_K {
+                    flush(b.get_unchecked_mut(bk), recs.get_unchecked(bk * WC_K..bk * WC_K + WC_K), NT);
+                    *cnt.get_unchecked_mut(bk) = 0;
+                } else {
+                    *cnt.get_unchecked_mut(bk) = (c + 1) as u8;
+                }
+            }
+        });
+        for bk in 0..BUCKETS {
+            let c = cnt[bk] as usize;
+            if c > 0 {
+                flush(&mut b[bk], &recs[bk * WC_K..bk * WC_K + c], false);
+                cnt[bk] = 0;
+            }
+        }
+    });
+    if NT {
+        // Streaming stores are weakly ordered: make them visible before the
+        // buckets are handed to other threads.
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            std::arch::x86_64::_mm_sfence()
+        };
+    }
+    b
+}
+
+/// Parse every line of a chunk; hand each record and its eid bucket to `sink`.
+#[inline(always)]
+fn parse_lines(chunk: &[u8], ctx: &Ctx, mut sink: impl FnMut(usize, RawEv)) {
     let (ws, we) = (ctx.window_start, ctx.window_end);
     csv::for_each_line::<7>(chunk, |f| {
         let Some(eid) = f[0] else { return };
@@ -128,9 +244,8 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
             eid_tag: eid.tag,
             etv: etype | (valid as u8) << 7,
         };
-        b[crate::partition::bucket_wide(&eid)].push(r);
+        sink(crate::partition::bucket_wide(&eid), r);
     });
-    b
 }
 
 /// Fingerprint of an event_id's hash for the dedup table: 28 high bits (the slot

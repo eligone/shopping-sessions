@@ -57,6 +57,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [050](050-dictionary-output.md) | Dictionary-encoded output columns | Withdrawn (reverted) |
 | [051](051-dockerfile-avx2.md) | Build with AVX2 whatever the Docker builder | Accepted (branch `lowlevel`) |
 | [052](052-512-partitions.md) | 512 partitions and event-id buckets | Accepted (branch `lowlevel`) |
+| [053](053-software-write-combining.md) | Software write-combining in the events parse scatter | Accepted (branch `lowlevel`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -223,3 +224,4 @@ One line per commit, newest last.
 - 2026-11-22: `73af7c2` scored 1.62 s. ADR-050 experiment: dictionary-encoded output (104 MB -> 45 MB), +0.02 s on the VM, to test on the scorer.
 - 2026-11-22: ADR-051: the Dockerfile only enabled AVX2 when BuildKit set TARGETARCH. Under the classic builder the image ran 3.6 s against 2.25 s with the scorer's docker flags on the VM. Fixed with a `uname -m` check; ADR-050 reverted.
 - 2026-11-22: x86-64-v4 (AVX-512) was slower on the VM (1.928 vs 1.902 s), not used. ADR-052: 512 partitions; -0.11 s without huge pages, neutral with them.
+- 2026-11-22: ADR-053: per-thread staging (16 records per bucket) in the events parse; VM 20M median 2.002 -> 1.943 s, faster in 5/5 rounds. Fixtures and dev MATCH; check.sh full skipped for time.
