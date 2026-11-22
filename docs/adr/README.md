@@ -78,6 +78,8 @@ Score is run time from container start to exit, lower is better.
 - **Tenth submission (`c203fa6` resubmitted): 6.94 s.** So the batch is about 5% faster, and the data changed:
   rules.md now says 1 in 8 IDs carries a 32-char hex suffix. Our single-lock escaped-ID table was the
   bottleneck (ADR-029).
+- **Eleventh submission (`703f333`, batch + sharded interner, ADR-026..029): scored 2.62 s** on the new data,
+  best so far (6.63 s before the interner fix). Leaderboard top: 0.51 s.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -148,3 +150,5 @@ One line per commit, newest last.
 - 2026-11-22: rules.md update (long hex-suffixed IDs) found; ADR-029 sharded interner, 2.2-2.5x faster on
   simulated long-ID data, matches DuckDB.
 - 2026-11-22: New generator and dev answer installed; dev set regenerated; all checks pass on the new data.
+- 2026-11-22: `703f333` scored 2.62 s on the new long-ID data (from 6.63 s); main moves to it, the old main is
+  saved as `scored-2.45-olddata`.

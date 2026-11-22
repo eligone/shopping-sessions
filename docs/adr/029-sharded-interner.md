@@ -34,3 +34,6 @@ ID by `scrambled & 7 == 0`; 12.3% of event and user ID values in the 1M dev set.
 regenerated dev set, `scripts/check.sh` passes: dev MATCH against the new official answer (118,107
 user-days), and new-generator seeds 2–3 MATCH DuckDB. Timing on that dev set: single lock
 0.34–0.51 s, sharded 0.12–0.15 s (2.7–3.5×).
+
+**Scored result.** `703f333` scored **2.62 s** on the new hidden data, against 6.63 s for `87780b9`
+(single lock): 2.5× faster, inside the 2.2–3.0 s estimate. A rules-auditor review found no issues.
