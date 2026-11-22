@@ -90,20 +90,58 @@ pub fn init_window(window_start: i64, window_end: i64) {
 fn fast_datetime(b: &[u8], months: &[Month]) -> Option<Option<i64>> {
     let p = u64::from_le_bytes(b[..8].try_into().unwrap());
     let m = months.iter().find(|m| m.prefix == p)?;
-    Some((|| {
-        if b[10] != b'T' || b[13] != b':' || b[16] != b':' {
-            return None;
-        }
-        let d = d2(b, 8)?;
-        let h = d2(b, 11)?;
-        let mi = d2(b, 14)?;
-        let s = d2(b, 17)?;
-        if d == 0 || d > m.days || h > 23 || mi > 59 || s > 59 {
-            return None;
-        }
-        let days = m.first_day + d as i64 - 1;
-        Some(((days * 24 + h as i64) * 60 + mi as i64) * 60_000 + s as i64 * 1000)
-    })())
+    // SWAR (ADR-044): check "DDT" and "HH:MM:SS" with two 8-byte loads instead of
+    // byte-by-byte branches. XOR with the template turns each expected digit into
+    // 0..=9 (only for '0'..='9') and each expected separator into 0.
+    let dt = u64::from_le_bytes(b[8..16].try_into().unwrap()) ^ DT_TEMPLATE;
+    let hms = u64::from_le_bytes(b[11..19].try_into().unwrap()) ^ HMS_TEMPLATE;
+    let dt = dt & 0xFF_FFFF; // only "DDT"; the rest is covered by `hms`
+    if !all_le9(dt) || !all_le9(hms) || dt & 0xFF_0000 != 0 || hms & HMS_SEPS != 0 {
+        return Some(None);
+    }
+    let d = ((dt & 0xFF) * 10 + (dt >> 8 & 0xFF)) as u32;
+    let h = (hms & 0xFF) * 10 + (hms >> 8 & 0xFF);
+    let mi = (hms >> 24 & 0xFF) * 10 + (hms >> 32 & 0xFF);
+    let s = (hms >> 48 & 0xFF) * 10 + (hms >> 56 & 0xFF);
+    if d == 0 || d > m.days || h > 23 || mi > 59 || s > 59 {
+        return Some(None);
+    }
+    let days = m.first_day + d as i64 - 1;
+    Some(Some(((days * 24 + h as i64) * 60 + mi as i64) * 60_000 + s as i64 * 1000))
+}
+
+/// "00T" + 5 zero bytes and "00:00:00", little-endian, for the XOR checks above.
+const DT_TEMPLATE: u64 = u64::from_le_bytes(*b"00T00000");
+const HMS_TEMPLATE: u64 = u64::from_le_bytes(*b"00:00:00");
+/// The two ':' bytes of "HH:MM:SS".
+const HMS_SEPS: u64 = 0xFF << 16 | 0xFF << 40;
+
+/// Every byte of `y` is at most 9. Exact: a byte with its top bit set fails
+/// directly; otherwise adding 0x76 cannot carry, and sets the top bit iff the byte is >= 10.
+#[inline(always)]
+fn all_le9(y: u64) -> bool {
+    (y | y.wrapping_add(0x7676_7676_7676_7676)) & 0x8080_8080_8080_8080 == 0
+}
+
+/// Eight digit values (0..=9, first digit in the lowest byte) to their number.
+#[inline(always)]
+fn swar8(v: u64) -> u64 {
+    let v = (v & 0x0F0F_0F0F_0F0F_0F0F).wrapping_mul(2561) >> 8;
+    let v = (v & 0x00FF_00FF_00FF_00FF).wrapping_mul(6_553_601) >> 16;
+    (v & 0x0000_FFFF_0000_FFFF).wrapping_mul(42_949_672_960_001) >> 32
+}
+
+/// F3 with at most 16 characters: left-pad with '0' to 16 and decode two 8-digit halves.
+#[inline]
+fn f3_short(b: &[u8]) -> Option<i64> {
+    let mut buf = [b'0'; 16];
+    buf[16 - b.len()..].copy_from_slice(b);
+    let hi = u64::from_le_bytes(buf[..8].try_into().unwrap()) ^ 0x3030_3030_3030_3030;
+    let lo = u64::from_le_bytes(buf[8..].try_into().unwrap()) ^ 0x3030_3030_3030_3030;
+    if !all_le9(hi) || !all_le9(lo) {
+        return None;
+    }
+    Some((swar8(hi) * 100_000_000 + swar8(lo)) as i64)
 }
 
 /// Date part + time of day shared by F1 and F2: `YYYY-MM-DDTHH:MM:SS`.
@@ -158,6 +196,9 @@ pub fn parse_ts(b: &[u8]) -> Option<i64> {
         _ => {}
     }
     // F3: ASCII digits only, leading zeros allowed.
+    if b.len() <= 16 {
+        return f3_short(b);
+    }
     let mut v: i64 = 0;
     let mut sig = 0usize; // significant digits seen
     for &c in b {
@@ -226,6 +267,40 @@ mod tests {
         assert!(parse_ts(b"2100-02-29T00:00:00Z").is_none());
     }
 
+    /// The SWAR F3 path equals the digit loop on random digit strings up to 16
+    /// characters, with leading zeros and one non-digit planted (ADR-044).
+    #[test]
+    fn fuzz_f3_short_matches_loop() {
+        fn slow(b: &[u8]) -> Option<i64> {
+            let mut v: i64 = 0;
+            for &c in b {
+                let d = c.wrapping_sub(b'0');
+                if d >= 10 {
+                    return None;
+                }
+                v = v * 10 + d as i64;
+            }
+            Some(v)
+        }
+        let mut seed: u64 = 0x2545_F491_4F6C_DD1D;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..200_000 {
+            let len = 1 + (next() % 16) as usize;
+            let mut b: Vec<u8> = (0..len).map(|_| b'0' + (next() % 10) as u8).collect();
+            if next() % 4 == 0 {
+                let at = (next() % len as u64) as usize;
+                b[at] = (next() % 256) as u8; // any byte, often a non-digit
+            }
+            assert_eq!(f3_short(&b), slow(&b), "{:?}", b);
+            assert_eq!(parse_ts(&b), slow(&b), "{:?}", b);
+        }
+    }
+
     /// The month-table fast path equals the full parser on random datetimes in and
     /// around random windows, including impossible days, hours, separators (ADR-039).
     #[test]
@@ -237,7 +312,7 @@ mod tests {
             seed ^= seed << 17;
             seed
         };
-        for _ in 0..200 {
+        for _ in 0..400 {
             // A random 14-day window from 2025 to 2028, like the generator.
             let ws_day = days_from_civil(2025, 1, 1) + (next() % (4 * 365)) as i64;
             let ws = ws_day * MS_PER_DAY;
@@ -260,6 +335,10 @@ mod tests {
                 if next() % 12 == 0 {
                     let at = [10usize, 13, 16, 8, 9][(next() % 5) as usize];
                     str[at] = b"x T:0"[(next() % 5) as usize];
+                }
+                if next() % 6 == 0 {
+                    let at = 8 + (next() % 11) as usize; // any byte in "DDTHH:MM:SS"
+                    str[at] = (next() % 256) as u8;
                 }
                 let full = parse_datetime_full(&str);
                 let fast = fast_datetime(&str, &months).unwrap_or_else(|| parse_datetime_full(&str));

@@ -48,6 +48,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [041](041-links-first.md) | Parse links first on all threads; union-find alongside the events parse | Accepted (branch `lowlevel`) |
 | [042](042-counting-sort-partitions.md) | Group each partition by person with a counting sort | Accepted (branch `lowlevel`) |
 | [043](043-smaller-persons-map.md) | Persons map without identity entries; prefetch in clicks | Rejected (scored 2.02 s vs 1.68 s) |
+| [044](044-swar-timestamps.md) | SWAR timestamp checks (F1/F2 time of day, short F3) | Accepted (branch `lowlevel`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -205,3 +206,4 @@ One line per commit, newest last.
 - 2026-11-22: ADR-043: persons map holds only IDs that map to someone else; clicks prefetch the map slot; -0.02 s on the VM.
 - 2026-11-22: `181b845` scored 2.02 s; ADR-043 reverted (code back to `40c07ee`).
 - 2026-11-22: `check.sh full` also diffs seeds 15 and 62 (window spans Feb 29, 2028), 66 (click look-back spans Feb 29) and 133 (window spans New Year); a sweep of seeds 11-400 found them, and 29/54/65/89 (New Year) also MATCH.
+- 2026-11-22: ADR-044: SWAR timestamp parsing; -0.095 s on the VM (2.148 -> 2.053 s).
