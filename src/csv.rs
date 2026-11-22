@@ -258,6 +258,7 @@ pub fn for_each_line<'a, const N: usize>(chunk: &'a [u8], mut f: impl FnMut(&[Op
 /// Iterate the lines of a chunk (split on `\n` only). A trailing `\n` does not
 /// produce an extra empty line; empty lines in the middle are yielded and then
 /// rejected by `fields`.
+#[cfg_attr(not(test), allow(dead_code))] // used by the fuzz-test oracles and input tests
 #[inline]
 pub fn lines(chunk: &[u8]) -> impl Iterator<Item = &[u8]> {
     let body = match chunk.last() {

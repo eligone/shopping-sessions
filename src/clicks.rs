@@ -38,7 +38,7 @@ pub fn load(src: &crate::input::Source, ctx: &Ctx, persons: &FlatMap<Key>) -> Ve
             }
             let user = ids::pack(user);
             let person = persons.get(user).unwrap_or(user);
-            out[crate::partition::bucket(person)].push(Click { person, cid: ids::pack(cid), ts: t, camp });
+            out[crate::partition::bucket(person)].push(Click { person, cid: ids::pack_once(cid), ts: t, camp });
         });
         out
     })

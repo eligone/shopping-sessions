@@ -83,10 +83,41 @@ pub fn try_encode(b: &[u8]) -> Option<Key> {
 /// Exact key of any non-empty ID.
 #[inline]
 pub fn pack(b: &[u8]) -> Key {
+    if let Some(k) = try_encode(b) {
+        return k;
+    }
+    // Long hex-shaped IDs repeat (a user ID appears in each of its person's events):
+    // check this thread's private cache before the shared, locked interner (ADR-035).
+    if let Some(w) = try_hex_shape(b) {
+        return CACHE.with(|c| {
+            let mut c = c.borrow_mut();
+            if let Some(k) = c.get(w) {
+                return k;
+            }
+            let k = pack_escaped(b);
+            c.insert_new(w, k);
+            k
+        });
+    }
+    pack_escaped(b)
+}
+
+/// Exact key without touching the per-thread cache, for IDs that rarely repeat
+/// (click_id), so they don't crowd out the user IDs that do.
+#[inline]
+pub fn pack_once(b: &[u8]) -> Key {
     match try_encode(b) {
         Some(k) => k,
         None => pack_escaped(b),
     }
+}
+
+thread_local! {
+    /// Wide form of a hex-shaped ID -> its interner key. Private to the thread, so no
+    /// lock; exact, because the Wide form is exact (ADR-031) and the interner is
+    /// deterministic within a run.
+    static CACHE: std::cell::RefCell<crate::table::WideMap<Key>> =
+        std::cell::RefCell::new(crate::table::WideMap::with_capacity(1 << 12));
 }
 
 fn pack_escaped(b: &[u8]) -> Key {
@@ -434,5 +465,33 @@ mod tests {
         assert_eq!(wide(b"e0123456789ABCDEF0123456789abcdef").tag, 255);
         assert_eq!(wide(b"e0123456789abcdef0123456789abcde").tag, 255);
         assert_eq!(wide(b"u4wi18vd5").tag, 0);
+    }
+
+    /// The cached path (`pack`) and the uncached one (`pack_once`) give the same key
+    /// for every ID, on every thread, however often it repeats (ADR-035).
+    #[test]
+    fn cached_pack_matches_uncached() {
+        let ids: Vec<Vec<u8>> = (0..3000u32)
+            .map(|i| match i % 3 {
+                0 => format!("u{:032x}", (i as u128 % 700).wrapping_mul(0x9E37_79B9_7F4A_7C15_1234)).into_bytes(),
+                1 => format!("u{:x}", i % 500).into_bytes(),
+                _ => format!("U{:032x}", i % 300).into_bytes(), // uppercase prefix: not hex-shaped
+            })
+            .collect();
+        std::thread::scope(|s| {
+            for t in 0..6 {
+                let ids = &ids;
+                s.spawn(move || {
+                    for round in 0..3 {
+                        for j in 0..ids.len() {
+                            let id = &ids[(j * 7 + t * 131 + round) % ids.len()];
+                            let a = pack(id);
+                            assert_eq!(a, pack_once(id));
+                            assert_eq!(&unpack(a), id);
+                        }
+                    }
+                });
+            }
+        });
     }
 }
