@@ -86,6 +86,8 @@ Score is run time from container start to exit, lower is better.
   (6.63 s before the interner fix). Leaderboard top: 0.51 s.
 - **Twelfth submission (`f06e24e`, ADR-030 cheaper cmp_ids + ADR-031 wide event IDs): scored 2.46 s**, best so far
   (−0.16 s, inside the scout's 0.15–0.25 s estimate).
+- **Thirteenth submission (`7f9f4ca`, ADR-032 direct-index lookups + ADR-033 mmap): scored 2.40 s**, best so far
+  (−0.06 s, within noise but in the expected direction).
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -163,3 +165,4 @@ One line per commit, newest last.
 - 2026-11-22: CLAUDE.md: explain decisions and concepts in plain language for the owner (an undergrad).
 - 2026-11-22: `f06e24e` scored 2.46 s (from 2.62 s); main moves to it, 2.62 s saved as `scored-2.62`.
 - 2026-11-22: ADR-032 direct-index product/campaign lookups (NumIndex), ADR-033 mmap in run.sh. First small batch.
+- 2026-11-22: `7f9f4ca` scored 2.40 s; main moves to it, 2.46 s saved as `scored-2.46`.
