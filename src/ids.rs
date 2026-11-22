@@ -51,33 +51,50 @@ fn hash_bytes(b: &[u8]) -> u64 {
         .hash_one(b)
 }
 
-#[inline]
-fn digit(c: u8) -> u64 {
-    match c {
-        b'0'..=b'9' => (c - b'0' + 1) as u64,
-        b'a'..=b'z' => (c - b'a' + 11) as u64,
-        _ => 0,
+/// Base-37 digit of each byte: `0-9` -> 1..=10, `a-z` -> 11..=36, anything else 0
+/// (ADR-037: a table lookup instead of a branch per character).
+static DIGIT: [u8; 256] = {
+    let mut t = [0u8; 256];
+    let mut c = 0;
+    while c < 10 {
+        t[b'0' as usize + c] = 1 + c as u8;
+        c += 1;
     }
-}
+    let mut c = 0;
+    while c < 26 {
+        t[b'a' as usize + c] = 11 + c as u8;
+        c += 1;
+    }
+    t
+};
+
+/// 37^k, for padding an ID of length n with one multiply by 37^(12 - n).
+static POW37: [u64; PLACES + 1] = {
+    let mut t = [1u64; PLACES + 1];
+    let mut k = 1;
+    while k <= PLACES {
+        t[k] = t[k - 1] * 37;
+        k += 1;
+    }
+    t
+};
 
 /// Base-37 key of an ID made only of `0-9a-z`, 1 to 12 bytes; `None` otherwise.
+/// Branch-free over the characters: validity is one flag checked at the end.
 #[inline]
 pub fn try_encode(b: &[u8]) -> Option<Key> {
-    if b.is_empty() || b.len() > PLACES {
+    let n = b.len();
+    if n == 0 || n > PLACES {
         return None;
     }
     let mut v: u64 = 0;
+    let mut all = 1u8; // stays 1 only if every digit is non-zero
     for &c in b {
-        let d = digit(c);
-        if d == 0 {
-            return None;
-        }
-        v = v * 37 + d;
+        let d = DIGIT[c as usize];
+        all &= (d != 0) as u8;
+        v = v * 37 + d as u64;
     }
-    for _ in b.len()..PLACES {
-        v *= 37;
-    }
-    Some(v)
+    if all == 0 { None } else { Some(v * POW37[PLACES - n]) }
 }
 
 /// Exact key of any non-empty ID. (A per-thread cache in front of the interner was
@@ -210,14 +227,22 @@ pub struct Wide {
     pub tag: u8,
 }
 
-#[inline]
-fn hex_nibble(c: u8) -> Option<u64> {
-    match c {
-        b'0'..=b'9' => Some((c - b'0') as u64),
-        b'a'..=b'f' => Some((c - b'a' + 10) as u64),
-        _ => None,
+/// Lowercase hex value of each byte (`0-9a-f`), or 0x10 for anything else
+/// (ADR-037: one table lookup per character, validity checked once).
+static HEX: [u8; 256] = {
+    let mut t = [0x10u8; 256];
+    let mut c = 0;
+    while c < 10 {
+        t[b'0' as usize + c] = c as u8;
+        c += 1;
     }
-}
+    let mut c = 0;
+    while c < 6 {
+        t[b'a' as usize + c] = 10 + c as u8;
+        c += 1;
+    }
+    t
+};
 
 #[inline]
 fn try_hex_shape(b: &[u8]) -> Option<Wide> {
@@ -226,13 +251,18 @@ fn try_hex_shape(b: &[u8]) -> Option<Wide> {
     }
     let mut hi = 0u64;
     let mut lo = 0u64;
+    let mut bad = 0u8; // any 0x10 marks a non-hex byte
     for &c in &b[1..17] {
-        hi = hi << 4 | hex_nibble(c)?;
+        let h = HEX[c as usize];
+        bad |= h;
+        hi = hi << 4 | (h & 15) as u64;
     }
     for &c in &b[17..33] {
-        lo = lo << 4 | hex_nibble(c)?;
+        let h = HEX[c as usize];
+        bad |= h;
+        lo = lo << 4 | (h & 15) as u64;
     }
-    Some(Wide { hi, lo, tag: 1 + (b[0] - b'a') })
+    if bad & 0x10 != 0 { None } else { Some(Wide { hi, lo, tag: 1 + (b[0] - b'a') }) }
 }
 
 /// Exact wide key of any non-empty ID.
