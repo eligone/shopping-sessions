@@ -8,4 +8,7 @@ export TMPDIR="$SCRATCH_DIR" HOME="$SCRATCH_DIR"
 # kernel where transparent huge pages are only given on request (ADR-022).
 # mimalloc falls back to normal pages if huge pages are unavailable.
 export MIMALLOC_ALLOW_LARGE_OS_PAGES=1
+# Read the inputs through mmap: scores are the median of warm repeat runs, where
+# mapping the page cache avoids pread's copy (ADR-033).
+export SS_READ=mmap
 exec /app/shopping-sessions

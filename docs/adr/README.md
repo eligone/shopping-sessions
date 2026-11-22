@@ -36,6 +36,8 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [029](029-sharded-interner.md) | Shard the escaped-ID interner for the generator's long IDs | Accepted (branch `partitioned`) |
 | [030](030-cheaper-cmp-ids.md) | Cheaper byte-wise ID comparison (`cmp_ids`) | Accepted (branch `partitioned`) |
 | [031](031-wide-event-ids.md) | Exact wide keys for event_id: no interning for long event IDs | Accepted (branch `partitioned`) |
+| [032](032-direct-index-lookups.md) | Direct-index product and campaign lookups; fast scanner for the small CSVs | Accepted (branch `partitioned`) |
+| [033](033-mmap-default.md) | Read inputs through mmap on the scorer (`SS_READ=mmap` in run.sh) | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -160,3 +162,4 @@ One line per commit, newest last.
 - 2026-11-22: ADR-031: exact wide event_id keys (long hex IDs packed into 128 bits), generic Table; RawEv 48 B.
 - 2026-11-22: CLAUDE.md: explain decisions and concepts in plain language for the owner (an undergrad).
 - 2026-11-22: `f06e24e` scored 2.46 s (from 2.62 s); main moves to it, 2.62 s saved as `scored-2.62`.
+- 2026-11-22: ADR-032 direct-index product/campaign lookups (NumIndex), ADR-033 mmap in run.sh. First small batch.

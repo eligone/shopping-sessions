@@ -11,6 +11,7 @@ mod events;
 mod ids;
 mod input;
 mod links;
+mod numindex;
 mod output;
 mod par;
 mod partition;
@@ -53,10 +54,12 @@ pub struct Ctx {
     pub window_end: i64,
     products: FlatMap<u16>,                       // base-37 encodable IDs
     products_other: HashMap<Vec<u8>, u16>,        // any other ID, by bytes
+    products_num: numindex::NumIndex,             // "prefix + number" IDs, direct index
     unknown_cat: u16,
     categories: Vec<Vec<u8>>, // id -> name, ids in byte-wise name order
     campaigns: FlatMap<u16>,
     campaigns_other: HashMap<Vec<u8>, u16>,
+    campaigns_num: numindex::NumIndex,
     campaign_names: Vec<Vec<u8>>,
     channels: Vec<Vec<u8>>,
 }
@@ -66,6 +69,10 @@ impl Ctx {
     /// Category of a product ID, `unknown` if not in products.csv. No interning:
     /// an ID that is not base-37 encodable is looked up by its bytes.
     pub fn category_of(&self, product: &[u8]) -> u16 {
+        // Direct index for the catalog's own "prefix + number" shape (ADR-032).
+        if let numindex::Lookup::Shaped(v) = self.products_num.get(product) {
+            return v.unwrap_or(self.unknown_cat);
+        }
         match ids::try_encode(product) {
             Some(k) => self.products.get(k),
             None => self.products_other.get(product).copied(),
@@ -74,6 +81,9 @@ impl Ctx {
     }
     #[inline]
     pub fn campaign_of(&self, campaign: &[u8]) -> Option<u16> {
+        if let numindex::Lookup::Shaped(v) = self.campaigns_num.get(campaign) {
+            return v;
+        }
         match ids::try_encode(campaign) {
             Some(k) => self.campaigns.get(k),
             None => self.campaigns_other.get(campaign).copied(),
@@ -84,14 +94,11 @@ impl Ctx {
 fn two_col_rows(path: &Path) -> Vec<(Vec<u8>, Vec<u8>)> {
     let data = input::read_small(path);
     let mut out = Vec::new();
-    for line in csv::lines(input::body(&data)) {
-        let mut f = [None; 2];
-        if csv::fields::<2>(line, &mut f) {
-            if let (Some(a), Some(b)) = (f[0], f[1]) {
-                out.push((a.to_vec(), b.to_vec()));
-            }
+    csv::for_each_line::<2>(input::body(&data), |f| {
+        if let (Some(a), Some(b)) = (f[0], f[1]) {
+            out.push((a.to_vec(), b.to_vec()));
         }
-    }
+    });
     out
 }
 
@@ -115,40 +122,64 @@ fn build_ctx(data: &Path) -> Ctx {
     names.sort();
     names.dedup();
     let cat_id = |n: &[u8]| names.binary_search_by(|x| x.as_slice().cmp(n)).unwrap() as u16;
-    let mut products = FlatMap::with_capacity(prows.len());
+    // "prefix + number" IDs go to a direct index; the rest to the exact general maps.
+    let (products_num, prest) = numindex::NumIndex::build(prows.iter().map(|(p, c)| (p.as_slice(), cat_id(c))));
+    let mut products = FlatMap::with_capacity(prest.len());
     let mut products_other = HashMap::new();
-    for (p, c) in &prows {
+    for (p, cat) in prest {
+        let c = cat;
         match ids::try_encode(p) {
             Some(k) => {
-                products.insert_new(k, cat_id(c));
+                products.insert_new(k, c);
             }
             None => {
-                products_other.entry(p.clone()).or_insert(cat_id(c));
+                products_other.entry(p.to_vec()).or_insert(c);
             }
         }
     }
     let unknown_cat = cat_id(b"unknown");
 
+    // Campaign ids in first-seen order (first row wins), then the same split as products.
     let crows = two_col_rows(&data.join("campaigns.csv"));
-    let mut campaigns = FlatMap::with_capacity(crows.len());
-    let mut campaigns_other: HashMap<Vec<u8>, u16> = HashMap::new();
+    let mut seen: HashMap<Vec<u8>, u16> = HashMap::new();
     let mut campaign_names = Vec::new();
     let mut channels = Vec::new();
     for (c, ch) in crows {
-        let id = campaign_names.len() as u16;
-        let fresh = match ids::try_encode(&c) {
-            Some(k) => campaigns.insert_new(k, id),
-            None => campaigns_other.try_insert_new(c.clone(), id),
-        };
-        if !fresh {
-            continue;
+        if seen.try_insert_new(c.clone(), campaign_names.len() as u16) {
+            campaign_names.push(c);
+            channels.push(ch);
         }
-        campaign_names.push(c);
-        channels.push(ch);
+    }
+    let (campaigns_num, crest) =
+        numindex::NumIndex::build(campaign_names.iter().enumerate().map(|(i, c)| (c.as_slice(), i as u16)));
+    let mut campaigns = FlatMap::with_capacity(crest.len());
+    let mut campaigns_other: HashMap<Vec<u8>, u16> = HashMap::new();
+    for (c, id) in crest {
+        match ids::try_encode(c) {
+            Some(k) => {
+                campaigns.insert_new(k, id);
+            }
+            None => {
+                campaigns_other.insert(c.to_vec(), id);
+            }
+        }
     }
     // Ev::ts is a u32 offset from window_start (ADR-023).
     assert!(window_end - window_start <= u32::MAX as i64, "window longer than 49 days");
-    Ctx { window_start, window_end, products, products_other, unknown_cat, categories: names, campaigns, campaigns_other, campaign_names, channels }
+    Ctx {
+        window_start,
+        window_end,
+        products,
+        products_other,
+        products_num,
+        unknown_cat,
+        categories: names,
+        campaigns,
+        campaigns_other,
+        campaigns_num,
+        campaign_names,
+        channels,
+    }
 }
 
 fn main() {
