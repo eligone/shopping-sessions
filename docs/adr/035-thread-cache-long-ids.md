@@ -22,3 +22,10 @@ form is exact ([ADR-031](031-wide-event-ids.md)) and the interner is determinist
 totals of 0.111–0.129 s are in the previous range. An uncontended lock is cheap on the Mac; the
 cache may matter more under 8-thread contention at 20M on the scorer. Judged by submission, or
 dropped if the research scout advises against it.
+
+**Revision (research scout review).** An unbounded per-thread map would grow to about 170k entries
+(about 10 MB per thread) and miss DRAM anyway. It is now a fixed, direct-mapped table of 2^15 slots
+(about 1 MB, sized for L2): a slot holds the exact Wide form and its key, and is overwritten on a
+miss. An empty slot's all-zero Wide can never equal a hex-shaped ID's (tag 1..=26). Checks still
+pass. Still no visible local gain (uncontended locks are cheap on the Mac); the scout estimates
+0.05–0.1 s on the scorer.

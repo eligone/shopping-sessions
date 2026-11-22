@@ -91,11 +91,13 @@ pub fn pack(b: &[u8]) -> Key {
     if let Some(w) = try_hex_shape(b) {
         return CACHE.with(|c| {
             let mut c = c.borrow_mut();
-            if let Some(k) = c.get(w) {
-                return k;
+            let slot = (w.mix() as usize) & (CACHE_SLOTS - 1);
+            let (cw, ck) = c[slot];
+            if cw == w {
+                return ck;
             }
             let k = pack_escaped(b);
-            c.insert_new(w, k);
+            c[slot] = (w, k); // overwrite: a small, cache-resident table (ADR-035)
             k
         });
     }
@@ -112,12 +114,17 @@ pub fn pack_once(b: &[u8]) -> Key {
     }
 }
 
+/// Slots in each thread's cache: 32k × 32 bytes ≈ 1 MB, sized to stay in L2.
+const CACHE_SLOTS: usize = 1 << 15;
+
 thread_local! {
-    /// Wide form of a hex-shaped ID -> its interner key. Private to the thread, so no
-    /// lock; exact, because the Wide form is exact (ADR-031) and the interner is
-    /// deterministic within a run.
-    static CACHE: std::cell::RefCell<crate::table::WideMap<Key>> =
-        std::cell::RefCell::new(crate::table::WideMap::with_capacity(1 << 12));
+    /// Direct-mapped cache: slot = hash of the Wide form; a slot holds the exact Wide
+    /// form and its interner key, and is overwritten on a miss. Private to the
+    /// thread, so no lock; exact, because the Wide form is exact (ADR-031) and the
+    /// interner is deterministic within a run. An empty slot (all-zero Wide) can
+    /// never equal a real hex-shaped ID's Wide (its tag is 1..=26).
+    static CACHE: std::cell::RefCell<Vec<(Wide, Key)>> =
+        std::cell::RefCell::new(vec![(Wide::default(), 0); CACHE_SLOTS]);
 }
 
 fn pack_escaped(b: &[u8]) -> Key {

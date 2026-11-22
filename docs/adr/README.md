@@ -170,3 +170,4 @@ One line per commit, newest last.
 - 2026-11-22: `7f9f4ca` scored 2.40 s; main moves to it, 2.46 s saved as `scored-2.46`.
 - 2026-11-22: ADR-034: parse ablation v2 on new data (scanner 44%, user interning 17%, product lookup ~0).
 - 2026-11-22: ADR-035: thread-local cache for long hex user IDs (pack_once for click IDs). No measurable local gain.
+- 2026-11-22: ADR-035 revised: direct-mapped, L2-sized (2^15 slots) thread cache, per the scout.
