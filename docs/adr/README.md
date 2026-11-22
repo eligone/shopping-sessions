@@ -204,3 +204,4 @@ One line per commit, newest last.
 - 2026-11-22: `40c07ee` scored 1.68 s (from 1.95 s).
 - 2026-11-22: ADR-043: persons map holds only IDs that map to someone else; clicks prefetch the map slot; -0.02 s on the VM.
 - 2026-11-22: `181b845` scored 2.02 s; ADR-043 reverted (code back to `40c07ee`).
+- 2026-11-22: `check.sh full` also diffs seeds 15 and 62 (window spans Feb 29, 2028), 66 (click look-back spans Feb 29) and 133 (window spans New Year); a sweep of seeds 11-400 found them, and 29/54/65/89 (New Year) also MATCH.
