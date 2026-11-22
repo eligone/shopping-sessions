@@ -190,3 +190,4 @@ One line per commit, newest last.
   2.987 -> 2.401 s (-20%).
 - 2026-11-22: `f03c56f` scored 2.01 s (from 2.40 s); main moves to it, 2.40 s saved as `scored-2.40`.
 - 2026-11-22: ADR-040: 8-byte fingerprint dedup slots (1 MB per bucket instead of 8 MB), -0.11 s on the VM.
+- 2026-11-22: CLAUDE.md documents the AWS benchmark VM as the source of truth for speed.

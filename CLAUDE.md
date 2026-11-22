@@ -42,6 +42,22 @@ reporting work or making a decision:
 - Before a risky rewrite, run `scripts/mutation_test.py` to confirm the tests still catch planted bugs.
 - Never commit data: `dev*/` and `out*/` are git-ignored; keep the repo under 50 MB.
 
+## Benchmark machine (AWS), the source of truth for speed
+
+Timings on the owner's Mac are NOT representative (ARM CPU, 16 KB pages, memory pressure). Measure on
+the AWS VM instead:
+- **Instance:** `m5.2xlarge` in us-east-1: Intel Xeon Platinum 8175M (Skylake-SP, 2.5 GHz), 4 cores × 2 HT =
+  8 vCPU, L2 1 MB/core, L3 33 MB, AVX2 + AVX-512, THP = `madvise`, 32 GB RAM, Ubuntu 24.04, Rust 1.85.
+  Launched with a 3-hour self-delete (`shutdown -h +180`, terminate on shutdown).
+- **Access:** key pair `hackathon-aws` (private key only at `~/.ssh/hackathon-aws` on the Mac, never
+  uploaded), security group `hackathon-ssh` (SSH from the owner's IP only).
+- **On the VM:** repo at `~/ss`, generator at `~/generator`, official answer at `~/dev-answer`, Python
+  venv at `~/.venv`. Datasets: `dev` (1M), `dev20` (20M, practice size), `dev60` (60M, final size).
+- **Workflow:** rsync `src`, `Cargo.*`, `run.sh` and `scripts` to `~/ss`, run `scripts/check.sh full` there with
+  `RUSTFLAGS="-C target-cpu=x86-64-v3"`, then time 5 alternating runs against the current best at 20M,
+  with `run.sh`'s environment.
+- **Calibration:** the VM has been about 15–20% slower than the scorer (VM 2.40 s → scorer 2.01 s).
+
 ## Where to run things
 
 **Do not run heavy work on the owner's laptop** (8 GB Mac, often near its memory limit): no
