@@ -198,6 +198,7 @@ fn main() {
     };
 
     let ctx = build_ctx(&data);
+    ts::init_window(ctx.window_start, ctx.window_end); // timestamp fast path (ADR-039)
     lap("manifest, products, campaigns");
 
     let mode = input::Mode::from_env();
