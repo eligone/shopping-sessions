@@ -7,7 +7,10 @@ ARG TARGETARCH
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN if [ "$TARGETARCH" = "amd64" ]; then export RUSTFLAGS="-C target-cpu=x86-64-v3"; fi; \
+# Decide by the build machine's real architecture, not $TARGETARCH: only BuildKit
+# sets TARGETARCH, and without it the old check silently built a binary with no
+# AVX2, so the SIMD scanner fell back to its byte loop (ADR-051).
+RUN if [ "$TARGETARCH" = "amd64" ] || [ "$(uname -m)" = "x86_64" ]; then export RUSTFLAGS="-C target-cpu=x86-64-v3"; fi; \
     cargo build --release --locked && strip target/release/shopping-sessions
 
 FROM debian:bookworm-slim

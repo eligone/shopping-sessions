@@ -54,7 +54,8 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [047](047-lockfree-hex-ids.md) | Lock-free table for long hex IDs | Accepted (branch `lowlevel`) |
 | [048](048-free-raw-buckets-early.md) | Free each event bucket's parsed copies once routed | Accepted (branch `lowlevel`) |
 | [049](049-mimalloc-no-purge.md) | Keep freed memory in the allocator (`MIMALLOC_PURGE_DELAY=-1`) | Accepted (branch `lowlevel`) |
-| [050](050-dictionary-output.md) | Dictionary-encoded output columns | Experiment (scorer test) |
+| [050](050-dictionary-output.md) | Dictionary-encoded output columns | Withdrawn (reverted) |
+| [051](051-dockerfile-avx2.md) | Build with AVX2 whatever the Docker builder | Accepted (branch `lowlevel`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -219,3 +220,4 @@ One line per commit, newest last.
 - 2026-11-22: ADR-048: free each event bucket's parsed copies once routed; -0.05 to -0.07 s without huge pages, neutral with them.
 - 2026-11-22: ADR-049: `run.sh` sets `MIMALLOC_PURGE_DELAY=-1`; -0.05 s with huge pages, -0.02 s without. Reading with pread instead of mmap was slower in both modes.
 - 2026-11-22: `73af7c2` scored 1.62 s. ADR-050 experiment: dictionary-encoded output (104 MB -> 45 MB), +0.02 s on the VM, to test on the scorer.
+- 2026-11-22: ADR-051: the Dockerfile only enabled AVX2 when BuildKit set TARGETARCH. Under the classic builder the image ran 3.6 s against 2.25 s with the scorer's docker flags on the VM. Fixed with a `uname -m` check; ADR-050 reverted.

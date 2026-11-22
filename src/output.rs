@@ -42,8 +42,7 @@ pub fn write(path: &Path, schema: &str, cols: Vec<Col>) -> parquet::errors::Resu
     let props = Arc::new(
         WriterProperties::builder()
             .set_compression(Compression::UNCOMPRESSED)
-            .set_dictionary_enabled(true) // ADR-050: much smaller files (repeated small values)
-            .set_column_dictionary_enabled(parquet::schema::types::ColumnPath::from("user_id"), false) // mostly unique
+            .set_dictionary_enabled(false)
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::None)
             .build(),
     );

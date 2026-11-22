@@ -1,6 +1,6 @@
 # ADR-050: Dictionary-encoded output columns (EXPERIMENT for the scorer)
 
-**Status:** Experiment (branch `lowlevel`): keep only if the scorer is faster than 1.62 s (`73af7c2`)
+**Status:** Withdrawn before scoring (reverted). ADR-051 found the real hidden cost, and this change was 0.02 s slower on the VM.
 **Date:** 2026-11-22
 
 ## Context
