@@ -176,3 +176,4 @@ One line per commit, newest last.
 - 2026-11-22: ADR-035 revised: direct-mapped, L2-sized (2^15 slots) thread cache, per the scout.
 - 2026-11-22: ADR-036: user_daily strings from one shared Bytes buffer, names unpacked once; output 2x faster locally.
 - 2026-11-22: `bb03de6` scored 2.51 s (worse); ADR-035 cache removed, ADR-036 kept for a clean A/B against `7f9f4ca`.
+- 2026-11-22: .gitignore also blocks SSH/key files (*.pem, *.key, id_*, hackathon-aws*).
