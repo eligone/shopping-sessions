@@ -147,3 +147,4 @@ One line per commit, newest last.
   scorer drift from a regression before bisecting ADR-026/027/028.
 - 2026-11-22: rules.md update (long hex-suffixed IDs) found; ADR-029 sharded interner, 2.2-2.5x faster on
   simulated long-ID data, matches DuckDB.
+- 2026-11-22: New generator and dev answer installed; dev set regenerated; all checks pass on the new data.

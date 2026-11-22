@@ -27,3 +27,10 @@ chains. Equality is always decided by comparing bytes, so the interner stays exa
   consistent 32-hex suffix (165,454 of 1,324,503). Rust matches DuckDB exactly.
 - **Timing, light, 3 alternating runs:** single lock 0.31–0.43 s, sharded 0.14–0.20 s, about
   2.2–2.5× faster.
+
+**Validated on the real new generator (same day).** The organizers' new `generator.zip` and
+`dev-answer.zip`: long IDs are a prefix letter plus 32 lowercase hex digits (33 bytes), chosen per
+ID by `scrambled & 7 == 0`; 12.3% of event and user ID values in the 1M dev set. With the
+regenerated dev set, `scripts/check.sh` passes: dev MATCH against the new official answer (118,107
+user-days), and new-generator seeds 2–3 MATCH DuckDB. Timing on that dev set: single lock
+0.34–0.51 s, sharded 0.12–0.15 s (2.7–3.5×).
