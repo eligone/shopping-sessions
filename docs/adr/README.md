@@ -98,7 +98,8 @@ Score is run time from container start to exit, lower is better.
 - **Fourteenth submission (`bb03de6`, ADR-035 thread cache + ADR-036 output buffer): 2.51 s**, slower than 2.40 s.
   Suspect: the cache (extra work per ID, and a 1 MB table competing for a 1 MB L2). Cache removed.
 - **Fifteenth submission (`f03c56f`, branch `lowlevel`: ADR-036 output, ADR-037 LUT IDs, ADR-038 inline, ADR-039
-  timestamp months): scored 2.01 s**, best so far. The Intel VM predicted about 2.0 s.
+  timestamp months): scored 2.01 s.** The Intel VM predicted about 2.0 s.
+- **Sixteenth submission (`562df83`, ADR-040 fingerprint dedup): scored 1.95 s**, best so far.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -191,3 +192,4 @@ One line per commit, newest last.
 - 2026-11-22: `f03c56f` scored 2.01 s (from 2.40 s); main moves to it, 2.40 s saved as `scored-2.40`.
 - 2026-11-22: ADR-040: 8-byte fingerprint dedup slots (1 MB per bucket instead of 8 MB), -0.11 s on the VM.
 - 2026-11-22: CLAUDE.md documents the AWS benchmark VM as the source of truth for speed.
+- 2026-11-22: `562df83` scored 1.95 s (from 2.01 s); main moves to it, 2.01 s saved as `scored-2.01`.

@@ -26,3 +26,5 @@ before.
 
 **Measurement (Intel VM, 20M, 5 alternating runs).** Median 2.567 s → **2.457 s** (−0.11 s); faster in
 4 of 5 runs.
+
+**Scored result.** `562df83` scored **1.95 s**, against 2.01 s for `f03c56f`.
