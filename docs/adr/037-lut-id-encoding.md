@@ -23,3 +23,6 @@ answer, and seeds 2–10 MATCH DuckDB.
 
 **Measurement (Intel VM, 20M events, run like run.sh, 5 alternating runs).** `a31e315` median 2.987 s
 → **2.698 s** (−0.29 s, −10%); faster in all 5 runs.
+
+**Scored result.** `f03c56f` (ADR-036 to ADR-039 together) scored **2.01 s** against 2.40 s, matching the
+Intel VM's prediction.

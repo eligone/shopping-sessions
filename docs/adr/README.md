@@ -96,6 +96,8 @@ Score is run time from container start to exit, lower is better.
   (−0.06 s, within noise but in the expected direction).
 - **Fourteenth submission (`bb03de6`, ADR-035 thread cache + ADR-036 output buffer): 2.51 s**, slower than 2.40 s.
   Suspect: the cache (extra work per ID, and a 1 MB table competing for a 1 MB L2). Cache removed.
+- **Fifteenth submission (`f03c56f`, branch `lowlevel`: ADR-036 output, ADR-037 LUT IDs, ADR-038 inline, ADR-039
+  timestamp months): scored 2.01 s**, best so far. The Intel VM predicted about 2.0 s.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -185,3 +187,4 @@ One line per commit, newest last.
 - 2026-11-22: ADR-038: #[inline(always)] for_each_line, 2.719 -> 2.691 s median on the VM.
 - 2026-11-22: ADR-039: timestamp month-table fast path, 2.679 -> 2.401 s on the VM. lowlevel total so far:
   2.987 -> 2.401 s (-20%).
+- 2026-11-22: `f03c56f` scored 2.01 s (from 2.40 s); main moves to it, 2.40 s saved as `scored-2.40`.

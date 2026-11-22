@@ -27,3 +27,6 @@ within a few weeks of the window.
 
 **Measurement (Intel VM, 20M, 5 alternating runs).** Median 2.679 s → **2.401 s** (−0.28 s, −10%);
 faster in all 5.
+
+**Scored result.** `f03c56f` (ADR-036 to ADR-039 together) scored **2.01 s** against 2.40 s, matching the
+Intel VM's prediction.
