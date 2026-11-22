@@ -35,6 +35,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [028](028-paired-slots-prefetch.md) | FlatMap slots hold key and value together; prefetch upcoming lookups | Accepted (branch `partitioned`) |
 | [029](029-sharded-interner.md) | Shard the escaped-ID interner for the generator's long IDs | Accepted (branch `partitioned`) |
 | [030](030-cheaper-cmp-ids.md) | Cheaper byte-wise ID comparison (`cmp_ids`) | Accepted (branch `partitioned`) |
+| [031](031-wide-event-ids.md) | Exact wide keys for event_id: no interning for long event IDs | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -154,3 +155,4 @@ One line per commit, newest last.
 - 2026-11-22: `703f333` scored 2.62 s on the new long-ID data (from 6.63 s); main moves to it, the old main is
   saved as `scored-2.45-olddata`.
 - 2026-11-22: ADR-030: cmp_ids with an equality short-circuit and no allocation for short vs escaped (auditor notes).
+- 2026-11-22: ADR-031: exact wide event_id keys (long hex IDs packed into 128 bits), generic Table; RawEv 48 B.

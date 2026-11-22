@@ -1,42 +1,76 @@
-//! A small open-addressing hash table for non-zero u64 keys (ADR-025).
+//! A small open-addressing hash table (ADR-025), generic over the key (ADR-031).
 //!
 //! One flat array of (key, value) slots, power-of-two capacity, linear probing, key 0
 //! marks an empty slot (no packed ID is ever 0). No deletion. It grows when 3/4
 //! full, so inserts always terminate. Narrower than `std::collections::HashMap`,
 //! and so simpler and more cache-friendly for our keys.
 
-use crate::ids::mix;
+use crate::ids::{mix, Wide};
+
+/// A key the table can hold: it has a reserved "empty" value that no real key
+/// takes, and a well-mixed 64-bit hash.
+pub trait SlotKey: Copy + Eq + Default {
+    fn is_empty(&self) -> bool;
+    fn hash64(&self) -> u64;
+}
+
+impl SlotKey for u64 {
+    #[inline]
+    fn is_empty(&self) -> bool {
+        *self == 0 // no packed ID is 0
+    }
+    #[inline]
+    fn hash64(&self) -> u64 {
+        mix(*self)
+    }
+}
+
+impl SlotKey for Wide {
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.tag == 0 && self.lo == 0 // never produced by ids::wide (ADR-031)
+    }
+    #[inline]
+    fn hash64(&self) -> u64 {
+        self.mix()
+    }
+}
+
+/// The table over u64 keys, used for products, campaigns, persons.
+pub type FlatMap<V> = Table<u64, V>;
+/// The table over exact wide keys, used for event dedup (ADR-031).
+pub type WideMap<V> = Table<Wide, V>;
 
 /// One slot: the key next to its value, so a lookup touches one cache line (ADR-028).
 #[derive(Clone, Copy, Default)]
-struct Entry<V: Copy + Default> {
-    k: u64,
+struct Entry<K: SlotKey, V: Copy + Default> {
+    k: K,
     v: V,
 }
 
-pub struct FlatMap<V: Copy + Default> {
-    slots: Vec<Entry<V>>,
+pub struct Table<K: SlotKey, V: Copy + Default> {
+    slots: Vec<Entry<K, V>>,
     mask: usize,
     len: usize,
 }
 
-impl<V: Copy + Default> FlatMap<V> {
+impl<K: SlotKey, V: Copy + Default> Table<K, V> {
     pub fn with_capacity(n: usize) -> Self {
         let cap = (n.max(8) * 2).next_power_of_two();
-        FlatMap { slots: vec![Entry::default(); cap], mask: cap - 1, len: 0 }
+        Table { slots: vec![Entry::default(); cap], mask: cap - 1, len: 0 }
     }
 
     #[inline]
-    fn start(&self, k: u64) -> usize {
+    fn start(&self, k: K) -> usize {
         // The low bits of the mix; partition buckets use bits 28..36, so they do not
         // correlate with the slot.
-        (mix(k) as usize) & self.mask
+        (k.hash64() as usize) & self.mask
     }
 
     /// Hint the CPU to start loading `k`'s first slot (ADR-028). Only a hint: it
     /// never changes results. A no-op where no prefetch instruction is used.
     #[inline(always)]
-    pub fn prefetch(&self, k: u64) {
+    pub fn prefetch(&self, k: K) {
         #[cfg(target_arch = "x86_64")]
         unsafe {
             use std::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
@@ -48,15 +82,15 @@ impl<V: Copy + Default> FlatMap<V> {
     }
 
     #[inline]
-    pub fn get(&self, k: u64) -> Option<V> {
-        debug_assert!(k != 0);
+    pub fn get(&self, k: K) -> Option<V> {
+        debug_assert!(!k.is_empty());
         let mut i = self.start(k);
         loop {
             let s = self.slots[i];
             if s.k == k {
                 return Some(s.v);
             }
-            if s.k == 0 {
+            if s.k.is_empty() {
                 return None;
             }
             i = (i + 1) & self.mask;
@@ -65,8 +99,8 @@ impl<V: Copy + Default> FlatMap<V> {
 
     /// If `k` is present, call `update` on its value; otherwise insert `v`.
     #[inline]
-    pub fn upsert(&mut self, k: u64, v: V, update: impl FnOnce(&mut V)) {
-        debug_assert!(k != 0);
+    pub fn upsert(&mut self, k: K, v: V, update: impl FnOnce(&mut V)) {
+        debug_assert!(!k.is_empty());
         let mut i = self.start(k);
         loop {
             let s = &mut self.slots[i];
@@ -74,7 +108,7 @@ impl<V: Copy + Default> FlatMap<V> {
                 update(&mut s.v);
                 return;
             }
-            if s.k == 0 {
+            if s.k.is_empty() {
                 s.k = k;
                 s.v = v;
                 self.len += 1;
@@ -89,7 +123,7 @@ impl<V: Copy + Default> FlatMap<V> {
 
     /// Insert only if absent (first value wins). Returns true if inserted.
     #[inline]
-    pub fn insert_new(&mut self, k: u64, v: V) -> bool {
+    pub fn insert_new(&mut self, k: K, v: V) -> bool {
         let before = self.len;
         self.upsert(k, v, |_| {});
         self.len > before
@@ -101,14 +135,14 @@ impl<V: Copy + Default> FlatMap<V> {
 
     /// Values of all entries, in slot order.
     pub fn values(&self) -> impl Iterator<Item = V> + '_ {
-        self.slots.iter().filter(|s| s.k != 0).map(|s| s.v)
+        self.slots.iter().filter(|s| !s.k.is_empty()).map(|s| s.v)
     }
 
     #[cold]
     fn grow(&mut self) {
-        let mut bigger = FlatMap::with_capacity(self.slots.len());
+        let mut bigger = Table::with_capacity(self.slots.len());
         for s in &self.slots {
-            if s.k != 0 {
+            if !s.k.is_empty() {
                 bigger.upsert(s.k, s.v, |_| {});
             }
         }

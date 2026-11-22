@@ -24,6 +24,12 @@ pub fn bucket(k: Key) -> usize {
     ((ids::mix(k) >> 28) & (PARTS as u64 - 1)) as usize
 }
 
+/// Bucket of a wide event_id key (ADR-031): same middle bits of its mix.
+#[inline]
+pub fn bucket_wide(k: &ids::Wide) -> usize {
+    ((k.mix() >> 28) & (PARTS as u64 - 1)) as usize
+}
+
 /// Concatenate one partition's pieces from every producer.
 fn gather<'a, T: Copy + 'a>(pieces: impl Iterator<Item = &'a Vec<T>> + Clone) -> Vec<T> {
     let n: usize = pieces.clone().map(|p| p.len()).sum();

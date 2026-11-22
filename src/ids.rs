@@ -177,6 +177,65 @@ pub fn cmp_ids(a: Key, b: Key) -> Ordering {
     }
 }
 
+/// An exact ID key used where an ID only needs equality (event_id dedup, ADR-031).
+/// - `tag == 0`: `lo` is the base-37 key of a short `[0-9a-z]{1,12}` ID;
+/// - `tag == 1..=26`: the ID is `[a-z]` + exactly 32 lowercase hex digits (the
+///   generator's long shape); `tag` is the letter, `hi:lo` the 128-bit hex value;
+/// - `tag == 255`: anything else; `lo` is the sharded interner's key.
+/// The shapes cannot overlap (lengths 1..=12, exactly 33, or "neither"), each is
+/// injective, so equal keys <=> equal IDs, with no hashing or locking for the
+/// two common shapes. All-zero (tag 0, lo 0) never occurs, so it can mark empty.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub struct Wide {
+    pub hi: u64,
+    pub lo: u64,
+    pub tag: u8,
+}
+
+#[inline]
+fn hex_nibble(c: u8) -> Option<u64> {
+    match c {
+        b'0'..=b'9' => Some((c - b'0') as u64),
+        b'a'..=b'f' => Some((c - b'a' + 10) as u64),
+        _ => None,
+    }
+}
+
+#[inline]
+fn try_hex_shape(b: &[u8]) -> Option<Wide> {
+    if b.len() != 33 || !b[0].is_ascii_lowercase() {
+        return None;
+    }
+    let mut hi = 0u64;
+    let mut lo = 0u64;
+    for &c in &b[1..17] {
+        hi = hi << 4 | hex_nibble(c)?;
+    }
+    for &c in &b[17..33] {
+        lo = lo << 4 | hex_nibble(c)?;
+    }
+    Some(Wide { hi, lo, tag: 1 + (b[0] - b'a') })
+}
+
+/// Exact wide key of any non-empty ID.
+#[inline]
+pub fn wide(b: &[u8]) -> Wide {
+    if let Some(k) = try_encode(b) {
+        return Wide { hi: 0, lo: k, tag: 0 };
+    }
+    if let Some(w) = try_hex_shape(b) {
+        return w;
+    }
+    Wide { hi: 0, lo: pack_escaped(b), tag: 255 }
+}
+
+impl Wide {
+    #[inline]
+    pub fn mix(&self) -> u64 {
+        mix(self.lo ^ self.hi.rotate_left(23) ^ (self.tag as u64) << 56)
+    }
+}
+
 /// A fast, good-enough mix of a key to 64 bits (for bucketing and hashing).
 #[inline]
 pub fn mix(k: Key) -> u64 {
@@ -297,5 +356,83 @@ mod tests {
                 assert_eq!(&unpack(k), id);
             }
         }
+    }
+
+    /// `wide` is exact: equal keys if and only if equal bytes, across all shapes,
+    /// including near-misses of the 33-byte hex shape (ADR-031).
+    #[test]
+    fn fuzz_wide_is_exact() {
+        let mut seed: u64 = 0xA076_1D64_78BD_642F;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let hex = b"0123456789abcdef";
+        let mut ids: Vec<Vec<u8>> = Vec::new();
+        for i in 0..4000u32 {
+            let mut id: Vec<u8> = Vec::new();
+            match i % 8 {
+                0..=2 => {
+                    // well-formed long: letter + 32 lowercase hex
+                    id.push(b'a' + (next() % 26) as u8);
+                    for _ in 0..32 {
+                        id.push(hex[(next() % 16) as usize]);
+                    }
+                }
+                3 => {
+                    // near misses: 31, 32 or 34 hex digits, a digit or uppercase prefix
+                    id.push(if next() % 2 == 0 { b'E' } else { b'7' });
+                    for _ in 0..(31 + next() % 4) {
+                        id.push(hex[(next() % 16) as usize]);
+                    }
+                }
+                4 => {
+                    // right length, one bad character (uppercase hex or a non-hex letter)
+                    id.push(b'e');
+                    for _ in 0..32 {
+                        id.push(hex[(next() % 16) as usize]);
+                    }
+                    let at = 1 + (next() % 32) as usize;
+                    id[at] = if next() % 2 == 0 { id[at].to_ascii_uppercase() } else { b'g' };
+                    if id[at].is_ascii_digit() {
+                        id[at] = b'z';
+                    }
+                }
+                5 => {
+                    // short base-36 style
+                    id.push(b'e');
+                    for _ in 0..(1 + next() % 8) {
+                        id.push(b"0123456789abcdefghijklmnopqrstuvwxyz"[(next() % 36) as usize]);
+                    }
+                }
+                _ => {
+                    // anything: spaces, punctuation, mixed case, any length
+                    for _ in 0..(1 + next() % 40) {
+                        id.push(b"aZ09 _-fF\t"[(next() % 10) as usize]);
+                    }
+                }
+            }
+            ids.push(id);
+        }
+        // Duplicates on purpose, so equal IDs must give equal keys.
+        let n = ids.len();
+        for j in 0..500 {
+            let dup = ids[(j * 7) % n].clone();
+            ids.push(dup);
+        }
+        let keys: Vec<Wide> = ids.iter().map(|x| wide(x)).collect();
+        for i in 0..ids.len() {
+            assert_ne!(keys[i], Wide::default(), "all-zero key must never occur");
+            for j in 0..ids.len() {
+                assert_eq!(keys[i] == keys[j], ids[i] == ids[j], "{:?} vs {:?}", String::from_utf8_lossy(&ids[i]), String::from_utf8_lossy(&ids[j]));
+            }
+        }
+        // The hex shape takes the fast path; near misses do not.
+        assert_eq!(wide(b"e0123456789abcdef0123456789abcdef").tag, b'e' - b'a' + 1);
+        assert_eq!(wide(b"e0123456789ABCDEF0123456789abcdef").tag, 255);
+        assert_eq!(wide(b"e0123456789abcdef0123456789abcde").tag, 255);
+        assert_eq!(wide(b"u4wi18vd5").tag, 0);
     }
 }

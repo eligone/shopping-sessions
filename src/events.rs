@@ -3,7 +3,7 @@
 
 use crate::csv;
 use crate::ids::{self, Key};
-use crate::table::FlatMap;
+use crate::table::{FlatMap, WideMap};
 use crate::ts;
 use crate::Ctx;
 use rayon::prelude::*;
@@ -18,17 +18,35 @@ const NO_PRODUCT: u16 = u16::MAX;
 const MAX_PRICE: u32 = 10_000_000;
 
 /// One parsed copy of an event. Validity is decided here, per copy, because the
-/// rules validate whichever copy wins dedup (ADR-015). 40 bytes (ADR-023).
+/// rules validate whichever copy wins dedup (ADR-015). The event_id is an exact
+/// wide key (ADR-031), stored as separate fields, with etype and the valid flag
+/// sharing a byte: 48 bytes.
 #[derive(Clone, Copy)]
 struct RawEv {
-    eid: Key,
-    user: Key, // 0 = null (a non-empty ID's key is never 0)
+    eid_hi: u64,
+    eid_lo: u64,
+    user: Key,   // 0 = null (a non-empty ID's key is never 0)
     ingest: i64, // dedup order: smallest wins
     ts: i64,
-    price: u32,  // purchase price (0 for view / cart)
+    price: u32, // purchase price (0 for view / cart)
     cat: u16,
-    etype: u8,
-    valid: bool, // passes every rule check, including "not late"
+    eid_tag: u8,
+    etv: u8, // bits 0-1: event type; bit 7: passes every rule check, including "not late"
+}
+
+impl RawEv {
+    #[inline]
+    fn eid(&self) -> ids::Wide {
+        ids::Wide { hi: self.eid_hi, lo: self.eid_lo, tag: self.eid_tag }
+    }
+    #[inline]
+    fn etype(&self) -> u8 {
+        self.etv & 3
+    }
+    #[inline]
+    fn valid(&self) -> bool {
+        self.etv & 0x80 != 0
+    }
 }
 
 /// A surviving event: 24 bytes (ADR-023). `ts` is milliseconds since window_start,
@@ -79,7 +97,7 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
     let (ws, we) = (ctx.window_start, ctx.window_end);
     csv::for_each_line::<7>(chunk, |f| {
         let Some(eid) = f[0] else { return };
-        let eid = ids::pack(eid);
+        let eid = ids::wide(eid);
         let etype = event_type(f[4]);
         let ts = f[2].and_then(ts::parse_ts).unwrap_or(BAD_TS);
         let ingest = f[3].map_or(i64::MAX, ts::parse_ingest);
@@ -97,16 +115,17 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
             && (etype != PURCHASE || price != 0)
             && ingest.saturating_sub(ts) <= ts::MS_PER_DAY;
         let r = RawEv {
-            eid,
+            eid_hi: eid.hi,
+            eid_lo: eid.lo,
             user: f[1].map_or(0, ids::pack),
             ingest,
             ts,
             price,
             cat,
-            etype,
-            valid,
+            eid_tag: eid.tag,
+            etv: etype | (valid as u8) << 7,
         };
-        b[crate::partition::bucket(eid)].push(r);
+        b[crate::partition::bucket_wide(&eid)].push(r);
     });
     b
 }
@@ -136,16 +155,16 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
         .into_par_iter()
         .map(|bi| {
             let n: usize = parsed.iter().map(|p| p[bi].len()).sum();
-            let mut best: FlatMap<u64> = FlatMap::with_capacity(n);
+            let mut best: WideMap<u64> = WideMap::with_capacity(n);
             const AHEAD: usize = 16; // prefetch distance, in records (ADR-028)
             for (ci, p) in parsed.iter().enumerate() {
                 let recs = &p[bi];
                 for (pos, r) in recs.iter().enumerate() {
                     if let Some(a) = recs.get(pos + AHEAD) {
-                        best.prefetch(a.eid);
+                        best.prefetch(a.eid());
                     }
                     let here = (ci as u64) << 32 | pos as u64;
-                    best.upsert(r.eid, here, |loc| {
+                    best.upsert(r.eid(), here, |loc| {
                         let cur = &parsed[(*loc >> 32) as usize][bi][(*loc & 0xFFFF_FFFF) as usize];
                         if r.ingest < cur.ingest {
                             *loc = here;
@@ -174,11 +193,11 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
                 let recs = &p[bi];
                 for (pos, r) in recs.iter().enumerate() {
                     if let Some(a) = recs.get(pos + AHEAD) {
-                        if a.valid {
+                        if a.valid() {
                             persons.prefetch(a.user);
                         }
                     }
-                    if win[i / 64] >> (i % 64) & 1 == 1 && r.valid {
+                    if win[i / 64] >> (i % 64) & 1 == 1 && r.valid() {
                         let user = r.user;
                         let person = persons.get(user).unwrap_or(user);
                         out[crate::partition::bucket(person)].push(Ev {
@@ -186,7 +205,7 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
                             ts: (r.ts - ws) as u32,
                             price: r.price,
                             cat: r.cat,
-                            etype: r.etype,
+                            etype: r.etype(),
                         });
                     }
                     i += 1;
@@ -204,7 +223,7 @@ mod tests {
     #[test]
     fn record_sizes() {
         // ADR-015: keep the per-line record small; it is written once per input line.
-        assert_eq!(std::mem::size_of::<super::RawEv>(), 40);
+        assert_eq!(std::mem::size_of::<super::RawEv>(), 48);
         assert_eq!(std::mem::size_of::<super::Ev>(), 24);
     }
 }
@@ -252,14 +271,14 @@ pub fn parse_bench(src: &crate::input::Source, ctx: &Ctx) {
                     if v == 3 {
                         continue;
                     }
-                    let eid = f[0].map_or(0, ids::pack);
+                    let eid = f[0].map_or(ids::Wide::default(), ids::wide);
                     let user = f[1].map_or(0, ids::pack);
                     let cat = f[5].map_or(NO_PRODUCT, |p| ctx.category_of(p));
-                    acc = acc.wrapping_add(eid as u64 ^ user as u64 ^ cat as u64);
+                    acc = acc.wrapping_add(eid.lo ^ user as u64 ^ cat as u64);
                     if v == 4 {
                         continue;
                     }
-                    acc = acc.wrapping_add(crate::partition::bucket(eid) as u64);
+                    acc = acc.wrapping_add(crate::partition::bucket_wide(&eid) as u64);
                 }
                 black_box(acc)
             });
