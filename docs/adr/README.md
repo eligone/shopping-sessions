@@ -38,6 +38,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [031](031-wide-event-ids.md) | Exact wide keys for event_id: no interning for long event IDs | Accepted (branch `partitioned`) |
 | [032](032-direct-index-lookups.md) | Direct-index product and campaign lookups; fast scanner for the small CSVs | Accepted (branch `partitioned`) |
 | [033](033-mmap-default.md) | Read inputs through mmap on the scorer (`SS_READ=mmap` in run.sh) | Accepted (branch `partitioned`) |
+| [034](034-parse-ablation-v2.md) | Re-measure the events parse on the new data, with the current scanner | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -166,3 +167,4 @@ One line per commit, newest last.
 - 2026-11-22: `f06e24e` scored 2.46 s (from 2.62 s); main moves to it, 2.62 s saved as `scored-2.62`.
 - 2026-11-22: ADR-032 direct-index product/campaign lookups (NumIndex), ADR-033 mmap in run.sh. First small batch.
 - 2026-11-22: `7f9f4ca` scored 2.40 s; main moves to it, 2.46 s saved as `scored-2.46`.
+- 2026-11-22: ADR-034: parse ablation v2 on new data (scanner 44%, user interning 17%, product lookup ~0).

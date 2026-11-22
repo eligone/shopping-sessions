@@ -11,6 +11,7 @@
 /// Bitmask version (ADR-018): a line of up to 128 bytes becomes two 128-bit masks,
 /// one bit per byte, marking commas and quotes. Field count, field boundaries and
 /// the quote rule are then bit arithmetic. Longer lines use `fields_scalar`.
+#[cfg_attr(not(test), allow(dead_code))] // kept as a fuzz-test oracle (ADR-024)
 #[inline]
 pub fn fields<'a, const N: usize>(line: &'a [u8], out: &mut [Option<&'a [u8]>; N]) -> bool {
     let len = line.len();
@@ -53,6 +54,7 @@ pub fn fields<'a, const N: usize>(line: &'a [u8], out: &mut [Option<&'a [u8]>; N
 
 /// Comma and quote masks of a 128-byte block: bit i set if byte i matches.
 /// Fixed-size loops over 64 bytes, which the compiler turns into SIMD compares.
+#[cfg_attr(not(test), allow(dead_code))] // kept as a fuzz-test oracle (ADR-024)
 #[inline]
 fn masks(buf: &[u8; 128]) -> (u128, u128) {
     let (mut c0, mut q0, mut c1, mut q1) = (0u64, 0u64, 0u64, 0u64);
@@ -68,6 +70,7 @@ fn masks(buf: &[u8; 128]) -> (u128, u128) {
 }
 
 /// Bits s..e (e exclusive) set, for 0 <= s <= e <= 128.
+#[cfg_attr(not(test), allow(dead_code))] // kept as a fuzz-test oracle (ADR-024)
 #[inline]
 fn range(s: usize, e: usize) -> u128 {
     let hi = if e >= 128 { u128::MAX } else { (1u128 << e) - 1 };
