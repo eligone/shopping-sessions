@@ -238,20 +238,21 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
     let parts = crate::partition::PARTS;
 
     // Per eid bucket: dedup by location (ADR-015), then route the valid winners.
-    let routed: Vec<Vec<Vec<Ev>>> = (0..BUCKETS)
+    // Each bucket owns its pieces and frees them when done, so later buckets' output
+    // reuses that memory instead of fresh pages (ADR-048).
+    let routed: Vec<Vec<Vec<Ev>>> = crate::partition::transpose(parsed)
         .into_par_iter()
-        .map(|bi| {
-            let n: usize = parsed.iter().map(|p| p[bi].len()).sum();
+        .map(|bucket| {
+            let n: usize = bucket.iter().map(|p| p.len()).sum();
             const AHEAD: usize = 16; // prefetch distance, in records (ADR-028)
-            let pieces: Vec<&[RawEv]> = parsed.iter().map(|p| p[bi].as_slice()).collect();
+            let pieces: Vec<&[RawEv]> = bucket.iter().map(|p| p.as_slice()).collect();
             // Winning copy of each event_id, one bit per record in (chunk, position)
             // order (ADR-027), from a cache-sized fingerprint table (ADR-040).
             let win = dedup_bucket(&pieces, fingerprint);
             let est = n / parts * 5 / 4 + 4;
             let mut out: Vec<Vec<Ev>> = (0..parts).map(|_| Vec::with_capacity(est)).collect();
             let mut i = 0usize;
-            for p in &parsed {
-                let recs = &p[bi];
+            for recs in &bucket {
                 for (pos, r) in recs.iter().enumerate() {
                     if let Some(a) = recs.get(pos + AHEAD) {
                         if a.valid() {

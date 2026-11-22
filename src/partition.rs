@@ -74,6 +74,17 @@ pub fn run(
         })
 }
 
+/// `[producer][partition]` -> `[partition][producer]`, moving the vectors (no copy).
+pub fn transpose<T>(v: Vec<Vec<Vec<T>>>) -> Vec<Vec<Vec<T>>> {
+    let mut out: Vec<Vec<Vec<T>>> = (0..PARTS).map(|_| Vec::with_capacity(v.len())).collect();
+    for row in v {
+        for (p, x) in row.into_iter().enumerate() {
+            out[p].push(x);
+        }
+    }
+    out
+}
+
 /// Group one partition by person with a counting sort (ADR-042), instead of a
 /// gather copy plus a comparison sort on (person, ts):
 /// 1. give each person a dense local id (first seen order), counting events per id;
