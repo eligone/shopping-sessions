@@ -115,30 +115,66 @@ pub fn is_escaped(k: Key) -> bool {
     k & ESC != 0
 }
 
-/// The ID's bytes.
-pub fn unpack(k: Key) -> Vec<u8> {
-    if is_escaped(k) {
-        let sh = shards()[((k >> 32) as usize) & (SHARDS - 1)].lock().unwrap();
-        let (start, len) = sh.spans[k as u32 as usize];
-        return sh.arena[start as usize..(start + len) as usize].to_vec();
-    }
+/// Bytes of a base-37 key, decoded on the stack: (buffer, length).
+#[inline]
+fn decode_short(k: Key) -> ([u8; PLACES], usize) {
     let mut digits = [0u8; PLACES];
     let mut v = k;
     for i in (0..PLACES).rev() {
         digits[i] = (v % 37) as u8;
         v /= 37;
     }
-    digits
-        .iter()
-        .take_while(|&&d| d != 0)
-        .map(|&d| if d <= 10 { b'0' + d - 1 } else { b'a' + d - 11 })
-        .collect()
+    let mut out = [0u8; PLACES];
+    let mut n = 0;
+    for &d in &digits {
+        if d == 0 {
+            break;
+        }
+        out[n] = if d <= 10 { b'0' + d - 1 } else { b'a' + d - 11 };
+        n += 1;
+    }
+    (out, n)
 }
 
-/// Byte-wise comparison of two IDs.
+/// Run `f` on an escaped ID's bytes under its shard's lock (one lock, no copy).
+#[inline]
+fn with_escaped<R>(k: Key, f: impl FnOnce(&[u8]) -> R) -> R {
+    let sh = shards()[((k >> 32) as usize) & (SHARDS - 1)].lock().unwrap();
+    let (start, len) = sh.spans[k as u32 as usize];
+    f(&sh.arena[start as usize..(start + len) as usize])
+}
+
+/// The ID's bytes.
+pub fn unpack(k: Key) -> Vec<u8> {
+    if is_escaped(k) {
+        return with_escaped(k, |b| b.to_vec());
+    }
+    let (buf, n) = decode_short(k);
+    buf[..n].to_vec()
+}
+
+/// Byte-wise comparison of two IDs. Never holds more than one shard lock, and
+/// allocates only when both sides are escaped (ADR-030).
 #[inline]
 pub fn cmp_ids(a: Key, b: Key) -> Ordering {
-    if !is_escaped(a) && !is_escaped(b) { a.cmp(&b) } else { unpack(a).cmp(&unpack(b)) }
+    if a == b {
+        return Ordering::Equal; // keys are exact: equal keys are equal IDs
+    }
+    match (is_escaped(a), is_escaped(b)) {
+        (false, false) => a.cmp(&b),
+        (false, true) => {
+            let (buf, n) = decode_short(a);
+            with_escaped(b, |bb| buf[..n].cmp(bb))
+        }
+        (true, false) => {
+            let (buf, n) = decode_short(b);
+            with_escaped(a, |ab| ab.cmp(&buf[..n]))
+        }
+        (true, true) => {
+            let av = unpack(a); // copied, so its lock is released before b's is taken
+            with_escaped(b, |bb| av.as_slice().cmp(bb))
+        }
+    }
 }
 
 /// A fast, good-enough mix of a key to 64 bits (for bucketing and hashing).

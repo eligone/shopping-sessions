@@ -34,6 +34,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [027](027-winner-bitset.md) | Mark dedup winners in a bitset instead of sorting their locations | Accepted (branch `partitioned`) |
 | [028](028-paired-slots-prefetch.md) | FlatMap slots hold key and value together; prefetch upcoming lookups | Accepted (branch `partitioned`) |
 | [029](029-sharded-interner.md) | Shard the escaped-ID interner for the generator's long IDs | Accepted (branch `partitioned`) |
+| [030](030-cheaper-cmp-ids.md) | Cheaper byte-wise ID comparison (`cmp_ids`) | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -152,3 +153,4 @@ One line per commit, newest last.
 - 2026-11-22: New generator and dev answer installed; dev set regenerated; all checks pass on the new data.
 - 2026-11-22: `703f333` scored 2.62 s on the new long-ID data (from 6.63 s); main moves to it, the old main is
   saved as `scored-2.45-olddata`.
+- 2026-11-22: ADR-030: cmp_ids with an equality short-circuit and no allocation for short vs escaped (auditor notes).
