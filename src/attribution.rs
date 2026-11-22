@@ -39,10 +39,9 @@ impl CampaignDaily {
 }
 
 /// Credit and assists for sessions and clicks of the same persons, both sorted by person.
-pub fn walk(sess: &[Session], clicks: &[Click], ncamp: usize, cd: &mut CampaignDaily) {
+pub fn walk<'c>(sess: &[Session], clicks_of: impl Fn(crate::ids::Key) -> &'c [Click], ncamp: usize, cd: &mut CampaignDaily) {
     let nd = cd.ndays;
     let day_idx = |start: i64| (start.div_euclid(MS_PER_DAY) - cd.first_day) as usize;
-    let mut ci = 0;
     let mut i = 0;
     let mut by_camp: Vec<(u16, i64)> = Vec::new();
     let mut day_blocks: Vec<(usize, usize, usize)> = Vec::new(); // (day index, first, last) session offsets
@@ -53,14 +52,8 @@ pub fn walk(sess: &[Session], clicks: &[Click], ncamp: usize, cd: &mut CampaignD
             j += 1;
         }
         let ps = &sess[i..j];
-        while ci < clicks.len() && clicks[ci].person < person {
-            ci += 1;
-        }
-        let cs = ci;
-        while ci < clicks.len() && clicks[ci].person == person {
-            ci += 1;
-        }
-        let pc = &clicks[cs..ci];
+        // This person's clicks, sorted by (ts, click_id), copies dropped (ADR-042).
+        let pc = clicks_of(person);
 
         // Credit.
         let mut p = 0;

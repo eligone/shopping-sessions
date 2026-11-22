@@ -46,6 +46,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [039](039-timestamp-month-table.md) | Timestamp fast path through a table of the window's months | Accepted (branch `lowlevel`) |
 | [040](040-fingerprint-dedup.md) | Cache-sized dedup table with 8-byte fingerprint slots | Accepted (branch `lowlevel`) |
 | [041](041-links-first.md) | Parse links first on all threads; union-find alongside the events parse | Accepted (branch `lowlevel`) |
+| [042](042-counting-sort-partitions.md) | Group each partition by person with a counting sort | Accepted (branch `lowlevel`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -195,3 +196,4 @@ One line per commit, newest last.
 - 2026-11-22: CLAUDE.md documents the AWS benchmark VM as the source of truth for speed.
 - 2026-11-22: `562df83` scored 1.95 s (from 2.01 s); main moves to it, 2.01 s saved as `scored-2.01`.
 - 2026-11-22: ADR-041: links parsed first, union-find overlapped with the events parse; -0.16 s on the VM.
+- 2026-11-22: ADR-042: counting-sort grouping per partition (no gather copy); -0.08 s on the VM.
