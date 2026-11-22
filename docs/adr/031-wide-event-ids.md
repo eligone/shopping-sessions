@@ -31,3 +31,6 @@ scout ranked removing it first (est. 0.15–0.25 s).
   all-zero key.
 - `scripts/check.sh`: 14/14 unit tests, fixtures in both modes, dev MATCH against the new official
   answer, new-generator seeds 2–3 MATCH DuckDB.
+
+**Scored result.** `f06e24e` (with ADR-030) scored **2.46 s**, against 2.62 s for `703f333`: −0.16 s,
+inside the research scout's 0.15–0.25 s estimate.
