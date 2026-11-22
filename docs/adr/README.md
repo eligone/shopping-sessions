@@ -42,6 +42,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [035](035-thread-cache-long-ids.md) | Per-thread cache in front of the interner for long hex-shaped IDs | **Rejected**: scored slower (2.51 s), removed |
 | [036](036-shared-buffer-output.md) | Write user_daily strings from one shared buffer | Accepted (branch `partitioned`) |
 | [037](037-lut-id-encoding.md) | Branch-free, table-driven ID encoding (base-37 and hex) | Accepted (branch `lowlevel`) |
+| [038](038-inline-scanner.md) | Force-inline the chunk scanner into its callers | Accepted (branch `lowlevel`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -180,3 +181,4 @@ One line per commit, newest last.
 - 2026-11-22: .gitignore also blocks SSH/key files (*.pem, *.key, id_*, hackathon-aws*).
 - 2026-11-22: Intel VM (AWS m5.2xlarge) set up for checks and 20M benchmarks. ADR-037 on branch `lowlevel`:
   LUT ID encoding, 2.987 -> 2.698 s median on the VM.
+- 2026-11-22: ADR-038: #[inline(always)] for_each_line, 2.719 -> 2.691 s median on the VM.

@@ -162,7 +162,7 @@ fn block_masks(b: &[u8; 64]) -> (u64, u64, u64) {
 /// ends a line; a line must have exactly N fields; a field is bare or wrapped in
 /// exactly one pair of quotes with none inside; an empty value is null; empty
 /// and malformed lines are skipped.
-#[inline]
+#[inline(always)] // ADR-038: inline into each caller so the per-line callback inlines too
 pub fn for_each_line<'a, const N: usize>(chunk: &'a [u8], mut f: impl FnMut(&[Option<&'a [u8]>; N])) {
     let len = chunk.len();
     let mut out: [Option<&'a [u8]>; N] = [None; N];
