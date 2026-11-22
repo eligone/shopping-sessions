@@ -3,7 +3,7 @@
 
 use crate::csv;
 use crate::ids::{self, Key};
-use crate::table::{FlatMap, WideMap};
+use crate::table::FlatMap;
 use crate::ts;
 use crate::Ctx;
 use rayon::prelude::*;
@@ -130,6 +130,91 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
     b
 }
 
+/// Fingerprint of an event_id's hash for the dedup table: 28 high bits (the slot
+/// uses the low bits and the bucket bits 28..36), never 0.
+#[inline(always)]
+fn fingerprint(h: u64) -> u32 {
+    ((h >> 36) as u32) | 1
+}
+
+#[inline(always)]
+fn prefetch_u64(t: &[u64], s: usize) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        use std::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
+        _mm_prefetch::<_MM_HINT_T0>(t.as_ptr().add(s) as *const i8);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = (t, s);
+}
+
+/// Exact dedup of one bucket's records (ADR-040). Keeps, per event_id, the copy
+/// with the smallest ingest_ts, the first one seen on ties (equal copies are
+/// identical). Returns a bitset over the records in (piece, position) order.
+///
+/// Slots are 8 bytes: `fingerprint << 32 | record index` (0 = empty; a fingerprint
+/// is never 0), at load ≤ 0.625, so a bucket of about 80k records needs 1 MB, not
+/// 8 MB. A fingerprint match only says "maybe": the full Wide event_ids are
+/// compared, so different IDs with equal fingerprints just keep probing.
+fn dedup_bucket<F: Fn(u64) -> u32>(pieces: &[&[RawEv]], fp_of: F) -> Vec<u64> {
+    let n: usize = pieces.iter().map(|p| p.len()).sum();
+    let mut first = Vec::with_capacity(pieces.len() + 1);
+    let mut acc = 0usize;
+    for p in pieces {
+        first.push(acc);
+        acc += p.len();
+    }
+    first.push(acc);
+    // Record by its index: the last piece starting at or before it (empty pieces
+    // share a start with the next piece, which is the one that holds it).
+    let rec = |i: u32| -> &RawEv {
+        let i = i as usize;
+        let ci = first.partition_point(|&s| s <= i) - 1;
+        &pieces[ci][i - first[ci]]
+    };
+    let cap = (n * 8 / 5).max(16).next_power_of_two();
+    let mask = cap - 1;
+    let mut t = vec![0u64; cap];
+    let mut i: u32 = 0;
+    for p in pieces {
+        for (pos, r) in p.iter().enumerate() {
+            if let Some(a) = p.get(pos + 16) {
+                prefetch_u64(&t, (a.eid().mix() as usize) & mask);
+            }
+            let eid = r.eid();
+            let h = eid.mix();
+            let f = fp_of(h);
+            let mut s = (h as usize) & mask;
+            loop {
+                let x = t[s];
+                if x == 0 {
+                    t[s] = (f as u64) << 32 | i as u64;
+                    break;
+                }
+                if (x >> 32) as u32 == f {
+                    let o = rec(x as u32);
+                    if o.eid() == eid {
+                        if r.ingest < o.ingest {
+                            t[s] = (f as u64) << 32 | i as u64;
+                        }
+                        break;
+                    }
+                }
+                s = (s + 1) & mask;
+            }
+            i += 1;
+        }
+    }
+    let mut win = vec![0u64; n / 64 + 1];
+    for &x in &t {
+        if x != 0 {
+            let j = x as u32 as usize;
+            win[j / 64] |= 1 << (j % 64);
+        }
+    }
+    win
+}
+
 /// Parsed copies of every event, per chunk and eid bucket. Opaque to callers.
 pub struct Parsed(Vec<Vec<Vec<RawEv>>>);
 
@@ -155,38 +240,12 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
         .into_par_iter()
         .map(|bi| {
             let n: usize = parsed.iter().map(|p| p[bi].len()).sum();
-            let mut best: WideMap<u64> = WideMap::with_capacity(n);
             const AHEAD: usize = 16; // prefetch distance, in records (ADR-028)
-            for (ci, p) in parsed.iter().enumerate() {
-                let recs = &p[bi];
-                for (pos, r) in recs.iter().enumerate() {
-                    if let Some(a) = recs.get(pos + AHEAD) {
-                        best.prefetch(a.eid());
-                    }
-                    let here = (ci as u64) << 32 | pos as u64;
-                    best.upsert(r.eid(), here, |loc| {
-                        let cur = &parsed[(*loc >> 32) as usize][bi][(*loc & 0xFFFF_FFFF) as usize];
-                        if r.ingest < cur.ingest {
-                            *loc = here;
-                        }
-                    });
-                }
-            }
-            // Mark each event's winning copy with one bit (ADR-027), indexed by its
-            // position in this bucket's records across all chunks, then read the
-            // records in their natural order: no random reads, no sort.
-            let mut first = Vec::with_capacity(parsed.len() + 1); // first[ci] = index of chunk ci's first record
-            let mut acc = 0usize;
-            for p in &parsed {
-                first.push(acc);
-                acc += p[bi].len();
-            }
-            let mut win = vec![0u64; n / 64 + 1];
-            for loc in best.values() {
-                let i = first[(loc >> 32) as usize] + (loc & 0xFFFF_FFFF) as usize;
-                win[i / 64] |= 1 << (i % 64);
-            }
-            let est = best.len() / parts * 5 / 4 + 4;
+            let pieces: Vec<&[RawEv]> = parsed.iter().map(|p| p[bi].as_slice()).collect();
+            // Winning copy of each event_id, one bit per record in (chunk, position)
+            // order (ADR-027), from a cache-sized fingerprint table (ADR-040).
+            let win = dedup_bucket(&pieces, fingerprint);
+            let est = n / parts * 5 / 4 + 4;
             let mut out: Vec<Vec<Ev>> = (0..parts).map(|_| Vec::with_capacity(est)).collect();
             let mut i = 0usize;
             for p in &parsed {
@@ -220,6 +279,64 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn raw(eid: ids::Wide, ingest: i64) -> RawEv {
+        RawEv { eid_hi: eid.hi, eid_lo: eid.lo, user: 1, ingest, ts: 0, price: 0, cat: 0, eid_tag: eid.tag, etv: 1 }
+    }
+
+    /// dedup_bucket keeps exactly the reference winners (smallest ingest, first seen on
+    /// ties), including with fingerprints forced to collide (ADR-040).
+    #[test]
+    fn fuzz_dedup_bucket_matches_reference() {
+        let mut seed: u64 = 0x2F3B_9D44_77AC_1E05;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for round in 0..60 {
+            let universe = 1 + next() % 3000;
+            let n = (next() % 6000) as usize;
+            let recs: Vec<RawEv> = (0..n)
+                .map(|_| {
+                    let k = next() % universe;
+                    let eid = match k % 3 {
+                        0 => ids::Wide { hi: 0, lo: 1 + k, tag: 0 },
+                        1 => ids::Wide { hi: k.wrapping_mul(0x9E37_79B9), lo: k, tag: 5 },
+                        _ => ids::Wide { hi: 0, lo: (1 << 63) | k, tag: 255 },
+                    };
+                    raw(eid, (next() % 50) as i64) // few distinct ingests -> many ties
+                })
+                .collect();
+            // Random split into pieces, some empty.
+            let mut pieces: Vec<&[RawEv]> = Vec::new();
+            let mut at = 0;
+            while at < recs.len() {
+                let len = if next() % 5 == 0 { 0 } else { (next() % 700) as usize };
+                let end = (at + len).min(recs.len());
+                pieces.push(&recs[at..end]);
+                at = end;
+            }
+            pieces.push(&recs[recs.len()..]);
+            let mut best: std::collections::HashMap<ids::Wide, (i64, usize)> = std::collections::HashMap::new();
+            for (i, r) in recs.iter().enumerate() {
+                let e = best.entry(r.eid()).or_insert((r.ingest, i));
+                if r.ingest < e.0 {
+                    *e = (r.ingest, i);
+                }
+            }
+            let mut want = vec![0u64; n / 64 + 1];
+            for &(_, i) in best.values() {
+                want[i / 64] |= 1 << (i % 64);
+            }
+            let colliding = |h: u64| ((h & 3) as u32) | 1; // only 2 distinct fingerprints
+            let fp = if round % 2 == 0 { super::fingerprint as fn(u64) -> u32 } else { colliding };
+            assert_eq!(dedup_bucket(&pieces, fp), want, "round {round}");
+        }
+    }
+
     #[test]
     fn record_sizes() {
         // ADR-015: keep the per-line record small; it is written once per input line.

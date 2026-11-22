@@ -220,7 +220,7 @@ pub fn cmp_ids(a: Key, b: Key) -> Ordering {
 /// The shapes cannot overlap (lengths 1..=12, exactly 33, or "neither"), each is
 /// injective, so equal keys <=> equal IDs, with no hashing or locking for the
 /// two common shapes. All-zero (tag 0, lo 0) never occurs, so it can mark empty.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
 pub struct Wide {
     pub hi: u64,
     pub lo: u64,

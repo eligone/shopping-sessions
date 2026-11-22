@@ -44,6 +44,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [037](037-lut-id-encoding.md) | Branch-free, table-driven ID encoding (base-37 and hex) | Accepted (branch `lowlevel`) |
 | [038](038-inline-scanner.md) | Force-inline the chunk scanner into its callers | Accepted (branch `lowlevel`) |
 | [039](039-timestamp-month-table.md) | Timestamp fast path through a table of the window's months | Accepted (branch `lowlevel`) |
+| [040](040-fingerprint-dedup.md) | Cache-sized dedup table with 8-byte fingerprint slots | Accepted (branch `lowlevel`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -188,3 +189,4 @@ One line per commit, newest last.
 - 2026-11-22: ADR-039: timestamp month-table fast path, 2.679 -> 2.401 s on the VM. lowlevel total so far:
   2.987 -> 2.401 s (-20%).
 - 2026-11-22: `f03c56f` scored 2.01 s (from 2.40 s); main moves to it, 2.40 s saved as `scored-2.40`.
+- 2026-11-22: ADR-040: 8-byte fingerprint dedup slots (1 MB per bucket instead of 8 MB), -0.11 s on the VM.

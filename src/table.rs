@@ -39,6 +39,7 @@ impl SlotKey for Wide {
 /// The table over u64 keys, used for products, campaigns, persons.
 pub type FlatMap<V> = Table<u64, V>;
 /// The table over exact wide keys, used for event dedup (ADR-031).
+#[allow(dead_code)]
 pub type WideMap<V> = Table<Wide, V>;
 
 /// One slot: the key next to its value, so a lookup touches one cache line (ADR-028).
