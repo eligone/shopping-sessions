@@ -156,3 +156,4 @@ One line per commit, newest last.
   saved as `scored-2.45-olddata`.
 - 2026-11-22: ADR-030: cmp_ids with an equality short-circuit and no allocation for short vs escaped (auditor notes).
 - 2026-11-22: ADR-031: exact wide event_id keys (long hex IDs packed into 128 bits), generic Table; RawEv 48 B.
+- 2026-11-22: CLAUDE.md: explain decisions and concepts in plain language for the owner (an undergrad).

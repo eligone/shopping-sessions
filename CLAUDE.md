@@ -21,6 +21,19 @@ Score is container run time on hidden data, so correctness first, then speed.
    than one big one at the end. Don't leave working changes uncommitted between steps.
    Push to the current branch after committing.
 
+## Explaining things to the owner
+
+The owner is an undergraduate who wants to learn from this project, not just get results. When
+reporting work or making a decision:
+- Explain the *why* in plain language before or alongside the technical detail. Define jargon the
+  first time it comes up (page fault, cache miss, SIMD, mutex, hash table, radix sort...).
+- Use a short everyday analogy when a concept is abstract.
+- After a meaningful step, add a brief "what you learned" note: the general lesson, not just what
+  changed here.
+- Say plainly what was measured versus estimated, and what was not tested.
+- Keep it digestible: tables and short sections over long walls of text.
+- Agents (subagents) should write their reports so the main session can relay them in this style.
+
 ## Before any commit that touches the pipeline
 
 - Run `scripts/check.sh`: build, unit tests, 36 fixtures in both read modes, exact dev-set
