@@ -71,6 +71,9 @@ Score is run time from container start to exit, lower is better.
   It also confirms the AVX2 path builds and is correct on the scorer.
 - **Eighth submission (`c203fa6`, FlatMap, ADR-025): scored 2.45 s**, best so far. Reviewed by the rules
   auditor first (no issues).
+- **Ninth submission (`87780b9`, batch ADR-026/027/028): scored 6.63 s** (Sun 12:01 AM). The leaderboard top
+  also moved from 0.28 s to 0.51 s, so the scorer itself appears slower (about 1.8x); the batch may also have
+  regressed. Next: resubmit `c203fa6` unchanged to measure the drift. Rules now say 2 submissions an hour.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -136,3 +139,5 @@ One line per commit, newest last.
 - 2026-11-21: ADR-027: dedup winners marked in a bitset; records read in order (no 20M-location sort).
 - 2026-11-21: ADR-028: FlatMap (key, value) slots; prefetch 16 ahead in dedup and route.
   Batch for one submission: ADR-026, 027, 028.
+- 2026-11-22: batch `87780b9` scored 6.63 s; leaderboard top 0.28 -> 0.51 s. Plan: resubmit `c203fa6` to separate
+  scorer drift from a regression before bisecting ADR-026/027/028.
