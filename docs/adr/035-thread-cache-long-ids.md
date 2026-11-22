@@ -1,6 +1,6 @@
 # ADR-035: Per-thread cache in front of the interner for long hex-shaped IDs
 
-- **Status:** Accepted (branch `partitioned`); benefit unproven locally
+- **Status:** Rejected (removed after scoring slower)
 - **Date:** 2026-11-22
 
 **Context.** The parse ablation ([ADR-034](034-parse-ablation-v2.md)) put user_id packing at about 17%
@@ -29,3 +29,14 @@ dropped if the research scout advises against it.
 miss. An empty slot's all-zero Wide can never equal a hex-shaped ID's (tag 1..=26). Checks still
 pass. Still no visible local gain (uncontended locks are cheap on the Mac); the scout estimates
 0.05–0.1 s on the scorer.
+
+**Scored result and removal.** `bb03de6` (this cache plus [ADR-036](036-shared-buffer-output.md)) scored
+**2.51 s** against 2.40 s for `7f9f4ca`. The likely cause is this cache:
+- every long user ID now pays a 32-digit hex decode plus a hash just to probe it, even on hits;
+- the 1 MB per-thread table is as big as a Cascade Lake core's whole L2 (1 MB), so it can evict the
+  parser's own working data.
+
+Removed: `pack` is the plain base-37-or-interner path again, and `pack_once` is an alias. The next
+submission (ADR-036 alone against `7f9f4ca`) tests this.
+
+**Lesson.** "Fits in L2" must count everything else that needs L2 at the same time.

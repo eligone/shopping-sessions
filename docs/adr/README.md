@@ -39,7 +39,7 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [032](032-direct-index-lookups.md) | Direct-index product and campaign lookups; fast scanner for the small CSVs | Accepted (branch `partitioned`) |
 | [033](033-mmap-default.md) | Read inputs through mmap on the scorer (`SS_READ=mmap` in run.sh) | Accepted (branch `partitioned`) |
 | [034](034-parse-ablation-v2.md) | Re-measure the events parse on the new data, with the current scanner | Accepted (branch `partitioned`) |
-| [035](035-thread-cache-long-ids.md) | Per-thread cache in front of the interner for long hex-shaped IDs | Accepted (branch `partitioned`); unproven locally |
+| [035](035-thread-cache-long-ids.md) | Per-thread cache in front of the interner for long hex-shaped IDs | **Rejected**: scored slower (2.51 s), removed |
 | [036](036-shared-buffer-output.md) | Write user_daily strings from one shared buffer | Accepted (branch `partitioned`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
@@ -91,6 +91,8 @@ Score is run time from container start to exit, lower is better.
   (−0.16 s, inside the scout's 0.15–0.25 s estimate).
 - **Thirteenth submission (`7f9f4ca`, ADR-032 direct-index lookups + ADR-033 mmap): scored 2.40 s**, best so far
   (−0.06 s, within noise but in the expected direction).
+- **Fourteenth submission (`bb03de6`, ADR-035 thread cache + ADR-036 output buffer): 2.51 s**, slower than 2.40 s.
+  Suspect: the cache (extra work per ID, and a 1 MB table competing for a 1 MB L2). Cache removed.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -173,3 +175,4 @@ One line per commit, newest last.
 - 2026-11-22: ADR-035: thread-local cache for long hex user IDs (pack_once for click IDs). No measurable local gain.
 - 2026-11-22: ADR-035 revised: direct-mapped, L2-sized (2^15 slots) thread cache, per the scout.
 - 2026-11-22: ADR-036: user_daily strings from one shared Bytes buffer, names unpacked once; output 2x faster locally.
+- 2026-11-22: `bb03de6` scored 2.51 s (worse); ADR-035 cache removed, ADR-036 kept for a clean A/B against `7f9f4ca`.

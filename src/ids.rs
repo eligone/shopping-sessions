@@ -80,51 +80,20 @@ pub fn try_encode(b: &[u8]) -> Option<Key> {
     Some(v)
 }
 
-/// Exact key of any non-empty ID.
+/// Exact key of any non-empty ID. (A per-thread cache in front of the interner was
+/// tried and removed: it scored slower on the scorer, ADR-035.)
 #[inline]
 pub fn pack(b: &[u8]) -> Key {
-    if let Some(k) = try_encode(b) {
-        return k;
-    }
-    // Long hex-shaped IDs repeat (a user ID appears in each of its person's events):
-    // check this thread's private cache before the shared, locked interner (ADR-035).
-    if let Some(w) = try_hex_shape(b) {
-        return CACHE.with(|c| {
-            let mut c = c.borrow_mut();
-            let slot = (w.mix() as usize) & (CACHE_SLOTS - 1);
-            let (cw, ck) = c[slot];
-            if cw == w {
-                return ck;
-            }
-            let k = pack_escaped(b);
-            c[slot] = (w, k); // overwrite: a small, cache-resident table (ADR-035)
-            k
-        });
-    }
-    pack_escaped(b)
-}
-
-/// Exact key without touching the per-thread cache, for IDs that rarely repeat
-/// (click_id), so they don't crowd out the user IDs that do.
-#[inline]
-pub fn pack_once(b: &[u8]) -> Key {
     match try_encode(b) {
         Some(k) => k,
         None => pack_escaped(b),
     }
 }
 
-/// Slots in each thread's cache: 32k × 32 bytes ≈ 1 MB, sized to stay in L2.
-const CACHE_SLOTS: usize = 1 << 15;
-
-thread_local! {
-    /// Direct-mapped cache: slot = hash of the Wide form; a slot holds the exact Wide
-    /// form and its interner key, and is overwritten on a miss. Private to the
-    /// thread, so no lock; exact, because the Wide form is exact (ADR-031) and the
-    /// interner is deterministic within a run. An empty slot (all-zero Wide) can
-    /// never equal a real hex-shaped ID's Wide (its tag is 1..=26).
-    static CACHE: std::cell::RefCell<Vec<(Wide, Key)>> =
-        std::cell::RefCell::new(vec![(Wide::default(), 0); CACHE_SLOTS]);
+/// Same as `pack`; kept as a separate name for click_id call sites.
+#[inline]
+pub fn pack_once(b: &[u8]) -> Key {
+    pack(b)
 }
 
 fn pack_escaped(b: &[u8]) -> Key {
