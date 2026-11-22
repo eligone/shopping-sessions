@@ -6,8 +6,9 @@ use crate::csv;
 use crate::ids::{self, Key, KeyMap};
 use crate::table::FlatMap;
 
-/// Map from every linked ID to its person's name. IDs not in the map are their own person.
-pub fn persons(src: &crate::input::Source) -> FlatMap<Key> {
+/// Parse every valid link line into an ID pair, in parallel (ADR-041: run this
+/// first, on all threads, so the small links input isn't queued behind events).
+pub fn parse_edges(src: &crate::input::Source) -> Vec<(Key, Key)> {
     let t0 = std::time::Instant::now();
     let edges: Vec<(Key, Key)> = src
         .par_map(|c| {
@@ -24,6 +25,12 @@ pub fn persons(src: &crate::input::Source) -> FlatMap<Key> {
         .collect();
 
     eprintln!("    links parse    {:.3}s ({} edges)", t0.elapsed().as_secs_f64(), edges.len());
+    edges
+}
+
+/// Map from every linked ID to its person's name. IDs not in the map are their own
+/// person. Single-threaded; runs alongside the events parse (ADR-041).
+pub fn persons(edges: Vec<(Key, Key)>) -> FlatMap<Key> {
     let t1 = std::time::Instant::now();
     // Intern the linked IDs.
     let mut index: KeyMap<u32> = ids::key_map(edges.len() * 2);

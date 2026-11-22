@@ -214,7 +214,9 @@ fn main() {
         return;
     }
     // Links run while events are parsed: parsing needs no person mapping (ADR-026).
-    let (persons, parsed) = rayon::join(|| links::persons(&ln_src), || events::parse(&ev_src, &ctx));
+    // Links first on all threads (small), then union-find alongside the events parse (ADR-041).
+    let edges = links::parse_edges(&ln_src);
+    let (persons, parsed) = rayon::join(|| links::persons(edges), || events::parse(&ev_src, &ctx));
     lap("links + events parse");
 
     let (ev, ck) = rayon::join(|| events::dedup_route(parsed, &ctx, &persons), || clicks::load(&ck_src, &ctx, &persons));
