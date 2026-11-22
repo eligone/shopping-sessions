@@ -20,14 +20,17 @@ const MAX_PRICE: u32 = 10_000_000;
 /// One parsed copy of an event. Validity is decided here, per copy, because the
 /// rules validate whichever copy wins dedup (ADR-015). The event_id is an exact
 /// wide key (ADR-031), stored as separate fields, with etype and the valid flag
-/// sharing a byte: 48 bytes.
+/// sharing a byte. The event time is stored as a u32 offset from the window
+/// start, and only for valid rows (the only rows that use it); the record is
+/// packed to 4-byte alignment: 44 bytes (ADR-044).
 #[derive(Clone, Copy)]
+#[repr(C, packed(4))]
 struct RawEv {
     eid_hi: u64,
     eid_lo: u64,
     user: Key,   // 0 = null (a non-empty ID's key is never 0)
     ingest: i64, // dedup order: smallest wins
-    ts: i64,
+    ts: u32, // ts - window_start if valid, else 0
     price: u32, // purchase price (0 for view / cart)
     cat: u16,
     eid_tag: u8,
@@ -119,7 +122,7 @@ fn parse_chunk(chunk: &[u8], ctx: &Ctx) -> Vec<Vec<RawEv>> {
             eid_lo: eid.lo,
             user: f[1].map_or(0, ids::pack),
             ingest,
-            ts,
+            ts: if valid { (ts - ws) as u32 } else { 0 },
             price,
             cat,
             eid_tag: eid.tag,
@@ -233,7 +236,6 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
     let parsed = parsed.0;
     let t1 = std::time::Instant::now();
     let parts = crate::partition::PARTS;
-    let ws = ctx.window_start;
 
     // Per eid bucket: dedup by location (ADR-015), then route the valid winners.
     let routed: Vec<Vec<Vec<Ev>>> = (0..BUCKETS)
@@ -261,7 +263,7 @@ pub fn dedup_route(parsed: Parsed, ctx: &Ctx, persons: &FlatMap<Key>) -> Vec<Vec
                         let person = persons.get(user).unwrap_or(user);
                         out[crate::partition::bucket(person)].push(Ev {
                             person,
-                            ts: (r.ts - ws) as u32,
+                            ts: r.ts,
                             price: r.price,
                             cat: r.cat,
                             etype: r.etype(),
@@ -340,7 +342,7 @@ mod tests {
     #[test]
     fn record_sizes() {
         // ADR-015: keep the per-line record small; it is written once per input line.
-        assert_eq!(std::mem::size_of::<super::RawEv>(), 48);
+        assert_eq!(std::mem::size_of::<super::RawEv>(), 44);
         assert_eq!(std::mem::size_of::<super::Ev>(), 24);
     }
 }
