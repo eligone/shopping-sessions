@@ -45,6 +45,19 @@ these records explain *why* the pipeline is built the way it is. One decision pe
 | [038](038-inline-scanner.md) | Force-inline the chunk scanner into its callers | Accepted (branch `lowlevel`) |
 | [039](039-timestamp-month-table.md) | Timestamp fast path through a table of the window's months | Accepted (branch `lowlevel`) |
 | [040](040-fingerprint-dedup.md) | Cache-sized dedup table with 8-byte fingerprint slots | Accepted (branch `lowlevel`) |
+| [041](041-links-first.md) | Parse links first on all threads; union-find alongside the events parse | Accepted (branch `lowlevel`) |
+| [042](042-counting-sort-partitions.md) | Group each partition by person with a counting sort | Accepted (branch `lowlevel`) |
+| [043](043-smaller-persons-map.md) | Persons map without identity entries; prefetch in clicks | Rejected (scored 2.02 s vs 1.68 s) |
+| [044](044-swar-timestamps.md) | SWAR timestamp checks (F1/F2 time of day, short F3) | Accepted (branch `lowlevel`) |
+| [045](045-two-stage-scanner.md) | Two-stage CSV scanner (separator index, then fixed-shape lines) | Accepted (branch `lowlevel`) |
+| [046](046-rawev-44-bytes.md) | 44-byte parsed event records | Accepted (branch `lowlevel`) |
+| [047](047-lockfree-hex-ids.md) | Lock-free table for long hex IDs | Accepted (branch `lowlevel`) |
+| [048](048-free-raw-buckets-early.md) | Free each event bucket's parsed copies once routed | Accepted (branch `lowlevel`) |
+| [049](049-mimalloc-no-purge.md) | Keep freed memory in the allocator (`MIMALLOC_PURGE_DELAY=-1`) | Accepted (branch `lowlevel`) |
+| [050](050-dictionary-output.md) | Dictionary-encoded output columns | Withdrawn (reverted) |
+| [051](051-dockerfile-avx2.md) | Build with AVX2 whatever the Docker builder | Accepted (branch `lowlevel`) |
+| [052](052-512-partitions.md) | 512 partitions and event-id buckets | Accepted (branch `lowlevel`) |
+| [053](053-software-write-combining.md) | Software write-combining in the events parse scatter | Accepted (branch `lowlevel`) |
 
 To add one: copy the next number, write Context / Decision / Why / Consequences, and add a row above.
 
@@ -99,7 +112,10 @@ Score is run time from container start to exit, lower is better.
   Suspect: the cache (extra work per ID, and a 1 MB table competing for a 1 MB L2). Cache removed.
 - **Fifteenth submission (`f03c56f`, branch `lowlevel`: ADR-036 output, ADR-037 LUT IDs, ADR-038 inline, ADR-039
   timestamp months): scored 2.01 s.** The Intel VM predicted about 2.0 s.
-- **Sixteenth submission (`562df83`, ADR-040 fingerprint dedup): scored 1.95 s**, best so far.
+- **Sixteenth submission (`562df83`, ADR-040 fingerprint dedup): scored 1.95 s**.
+- **Seventeenth submission (`40c07ee`, ADR-041 links first + ADR-042 counting sort): scored 1.68 s**, best so far.
+  The VM measured 2.151 s, so the scorer was about 22% faster than the VM.
+- **Eighteenth submission (`181b845`, ADR-043): scored 2.02 s**, slower than 1.68 s; ADR-043 reverted.
 - **First submission (`42c1d15`) ran past the practice limit** on about 20M events. The likely
   cause is the quadratic assists join on shared-device persons, removed in [ADR-009](009-assists-session-ranges.md). Current
   timing: about 7 s for 5M events on 4 laptop cores.
@@ -193,3 +209,19 @@ One line per commit, newest last.
 - 2026-11-22: ADR-040: 8-byte fingerprint dedup slots (1 MB per bucket instead of 8 MB), -0.11 s on the VM.
 - 2026-11-22: CLAUDE.md documents the AWS benchmark VM as the source of truth for speed.
 - 2026-11-22: `562df83` scored 1.95 s (from 2.01 s); main moves to it, 2.01 s saved as `scored-2.01`.
+- 2026-11-22: ADR-041: links parsed first, union-find overlapped with the events parse; -0.16 s on the VM.
+- 2026-11-22: ADR-042: counting-sort grouping per partition (no gather copy); -0.08 s on the VM.
+- 2026-11-22: `40c07ee` scored 1.68 s (from 1.95 s).
+- 2026-11-22: ADR-043: persons map holds only IDs that map to someone else; clicks prefetch the map slot; -0.02 s on the VM.
+- 2026-11-22: `181b845` scored 2.02 s; ADR-043 reverted (code back to `40c07ee`).
+- 2026-11-22: `check.sh full` also diffs seeds 15 and 62 (window spans Feb 29, 2028), 66 (click look-back spans Feb 29) and 133 (window spans New Year); a sweep of seeds 11-400 found them, and 29/54/65/89 (New Year) also MATCH.
+- 2026-11-22: ADR-044: SWAR timestamp parsing; -0.095 s on the VM (2.148 -> 2.053 s).
+- 2026-11-22: ADR-045 two-stage scanner + ADR-046 44-byte RawEv; -0.066 s on the VM (2.075 -> 2.009 s).
+- 2026-11-22: ADR-047: lock-free table for long hex user/click IDs; -0.078 s on the VM (2.009 -> 1.931 s).
+- 2026-11-22: `654aef4` scored 1.63 s. A no-huge-pages simulation (THP never) adds 0.67 s and 800k page faults on the VM, so changes are now benchmarked in both THP modes.
+- 2026-11-22: ADR-048: free each event bucket's parsed copies once routed; -0.05 to -0.07 s without huge pages, neutral with them.
+- 2026-11-22: ADR-049: `run.sh` sets `MIMALLOC_PURGE_DELAY=-1`; -0.05 s with huge pages, -0.02 s without. Reading with pread instead of mmap was slower in both modes.
+- 2026-11-22: `73af7c2` scored 1.62 s. ADR-050 experiment: dictionary-encoded output (104 MB -> 45 MB), +0.02 s on the VM, to test on the scorer.
+- 2026-11-22: ADR-051: the Dockerfile only enabled AVX2 when BuildKit set TARGETARCH. Under the classic builder the image ran 3.6 s against 2.25 s with the scorer's docker flags on the VM. Fixed with a `uname -m` check; ADR-050 reverted.
+- 2026-11-22: x86-64-v4 (AVX-512) was slower on the VM (1.928 vs 1.902 s), not used. ADR-052: 512 partitions; -0.11 s without huge pages, neutral with them.
+- 2026-11-22: ADR-053: per-thread staging (16 records per bucket) in the events parse; VM 20M median 2.002 -> 1.943 s, faster in 5/5 rounds. Fixtures and dev MATCH; check.sh full skipped for time.

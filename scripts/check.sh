@@ -41,8 +41,8 @@ tail -1 "$LOG"
 rm -rf out_check
 
 if [ "${1:-}" = "full" ]; then
-  echo "== diff vs DuckDB, seeds 2-10 (1M events)"
-  scripts/diff_test.sh 1000000 2 3 4 5 6 7 8 9 10
+  echo "== diff vs DuckDB, seeds 2-10 + calendar edges 15 62 66 133 (1M events)"
+  scripts/diff_test.sh 1000000 2 3 4 5 6 7 8 9 10 15 62 66 133
   if [ -d dev5 ]; then
     echo "== diff vs DuckDB, dev5 (5M events)"
     rm -rf o5_rs o5_db s5

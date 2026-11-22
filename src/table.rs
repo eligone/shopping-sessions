@@ -130,11 +130,13 @@ impl<K: SlotKey, V: Copy + Default> Table<K, V> {
         self.len > before
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.len
     }
 
     /// Values of all entries, in slot order.
+    #[allow(dead_code)]
     pub fn values(&self) -> impl Iterator<Item = V> + '_ {
         self.slots.iter().filter(|s| !s.k.is_empty()).map(|s| s.v)
     }

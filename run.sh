@@ -11,4 +11,6 @@ export MIMALLOC_ALLOW_LARGE_OS_PAGES=1
 # Read the inputs through mmap: scores are the median of warm repeat runs, where
 # mapping the page cache avoids pread's copy (ADR-033).
 export SS_READ=mmap
+# Keep freed memory for reuse instead of returning it to the OS after 10 ms (ADR-049).
+export MIMALLOC_PURGE_DELAY=-1
 exec /app/shopping-sessions

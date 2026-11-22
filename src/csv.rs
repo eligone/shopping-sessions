@@ -157,100 +157,118 @@ fn block_masks(b: &[u8; 64]) -> (u64, u64, u64) {
 
 /// Call `f` with the `N` fields of every well-formed line in `chunk`, in order (ADR-024).
 ///
-/// One pass over the chunk in 64-byte blocks: newline/comma/quote bitmasks, then
-/// a walk over the separator bits. Same rules as `lines` + `fields`: only `\n`
-/// ends a line; a line must have exactly N fields; a field is bare or wrapped in
-/// exactly one pair of quotes with none inside; an empty value is null; empty
-/// and malformed lines are skipped.
+/// Same rules as `lines` + `fields`: only `\n` ends a line; a line must have
+/// exactly N fields; a field is bare or wrapped in exactly one pair of quotes with
+/// none inside; an empty value is null; empty and malformed lines are skipped.
+///
+/// Two stages per window of the chunk (ADR-045):
+/// 1. 64-byte blocks -> newline/comma/quote bitmasks -> a small index of every
+///    separator: its position, whether it is a newline, and how many quotes come
+///    before it. No branches on the data.
+/// 2. Per line: the next N index entries must be N-1 commas then a newline
+///    (otherwise the line is skipped); each field's quote count is a difference of
+///    two entries, so validating and stripping quotes needs no byte loop.
 #[inline(always)] // ADR-038: inline into each caller so the per-line callback inlines too
-pub fn for_each_line<'a, const N: usize>(chunk: &'a [u8], mut f: impl FnMut(&[Option<&'a [u8]>; N])) {
+pub fn for_each_line<'a, const N: usize>(chunk: &'a [u8], f: impl FnMut(&[Option<&'a [u8]>; N])) {
+    scan_windows::<N>(chunk, 16 * 1024, f)
+}
+
+const NL_BIT: u32 = 1 << 31;
+
+#[inline(always)]
+fn scan_windows<'a, const N: usize>(chunk: &'a [u8], window: usize, mut f: impl FnMut(&[Option<&'a [u8]>; N])) {
     let len = chunk.len();
-    let mut out: [Option<&'a [u8]>; N] = [None; N];
-    let mut ls = 0usize; // line start
-    let mut fs = 0usize; // field start
-    let mut k = 0usize; // fields completed in this line
-    let mut bad = false;
-    let mut q = 0u32; // quotes seen in the current field so far
+    assert!(len < NL_BIT as usize, "chunk too large for 31-bit positions");
+    // Index entries: (position | NL_BIT if newline, quotes before the position).
+    let mut idx: Vec<(u32, u32)> = Vec::with_capacity(window + 64);
+    let mut ls = 0usize; // start of the current line
+    let mut lq = 0u32; // quotes before `ls`
+    let mut qbase = 0u32; // quotes before the current block
     let mut base = 0usize;
     let mut tail = [0u8; 64];
-    while base < len {
-        let block: &[u8; 64] = if base + 64 <= len {
-            chunk[base..base + 64].try_into().unwrap()
-        } else {
-            tail.fill(0);
-            tail[..len - base].copy_from_slice(&chunk[base..]);
-            &tail
-        };
-        let (nl, cm, qt) = block_masks(block);
-        let mut seps = nl | cm;
-        let mut from = 0u32; // first bit of the current field within this block
-        while seps != 0 {
-            let i = seps.trailing_zeros();
-            seps &= seps - 1;
-            let p = base + i as usize;
-            // Quotes in the field's part inside this block: bits from..i.
-            let span = if i == 0 { 0 } else { (u64::MAX >> (64 - i)) & (u64::MAX << from) };
-            q += (qt & span).count_ones();
-            let is_nl = nl >> i & 1 == 1;
-            if !bad {
-                let v = if q == 0 {
-                    Some(&chunk[fs..p])
-                } else if q == 2 && p - fs >= 2 && chunk[fs] == b'"' && chunk[p - 1] == b'"' {
-                    Some(&chunk[fs + 1..p - 1])
-                } else {
-                    None
-                };
-                match v {
-                    None => bad = true,
-                    Some(v) => {
-                        if k < N {
-                            out[k] = if v.is_empty() { None } else { Some(v) };
-                        }
-                        k += 1;
-                        if !is_nl && k >= N {
-                            bad = true; // too many fields
-                        }
-                    }
-                }
-            }
-            if is_nl {
-                if !bad && p > ls && k == N {
-                    f(&out);
-                }
-                ls = p + 1;
-                k = 0;
-                bad = false;
-            }
-            fs = p + 1;
-            q = 0;
-            from = i + 1;
-        }
-        // Quotes after the last separator belong to the field that continues.
-        if from < 64 {
-            q += (qt & (u64::MAX << from)).count_ones();
-        }
-        base += 64;
-    }
-    // A last line without a trailing newline.
-    if ls < len {
-        let p = len;
-        if !bad {
-            let v = if q == 0 {
-                Some(&chunk[fs..p])
-            } else if q == 2 && p - fs >= 2 && chunk[fs] == b'"' && chunk[p - 1] == b'"' {
-                Some(&chunk[fs + 1..p - 1])
+    loop {
+        // Stage 1: fill the index with about `window` separators (at least one
+        // block per round, so a line longer than the window still makes progress).
+        while base < len {
+            let block: &[u8; 64] = if base + 64 <= len {
+                chunk[base..base + 64].try_into().unwrap()
             } else {
-                None
+                tail.fill(0);
+                tail[..len - base].copy_from_slice(&chunk[base..]);
+                &tail
             };
-            if let Some(v) = v {
-                if k < N {
-                    out[k] = if v.is_empty() { None } else { Some(v) };
+            let (nl, cm, qt) = block_masks(block);
+            let mut seps = nl | cm;
+            // A block holds at most 64 separators: reserve once, then write without
+            // per-entry capacity checks.
+            idx.reserve(64);
+            let mut n = idx.len();
+            let dst = idx.as_mut_ptr();
+            while seps != 0 {
+                let i = seps.trailing_zeros();
+                seps &= seps - 1;
+                let below = (1u64 << i) - 1;
+                let qc = qbase + (qt & below).count_ones();
+                // SAFETY: n < old len + 64 <= capacity.
+                unsafe { dst.add(n).write(((base as u32 + i) | ((nl >> i & 1) as u32) << 31, qc)) };
+                n += 1;
+            }
+            // SAFETY: entries up to n were written above.
+            unsafe { idx.set_len(n) };
+            qbase += qt.count_ones();
+            base += 64;
+            if idx.len() >= window {
+                break;
+            }
+        }
+        let done = base >= len;
+        if done && len > 0 && chunk[len - 1] != b'\n' {
+            // The last line has no trailing newline: end it at the chunk's end.
+            idx.push((len as u32 | NL_BIT, qbase));
+        }
+        // Stage 2: every complete line in the index.
+        let complete = idx.iter().rposition(|e| e.0 & NL_BIT != 0).map_or(0, |k| k + 1);
+        let mut j = 0usize;
+        while j < complete {
+            let shaped = j + N <= complete
+                && idx[j + N - 1].0 & NL_BIT != 0
+                && idx[j..j + N - 1].iter().fold(0, |a, e| a | e.0) & NL_BIT == 0;
+            if shaped {
+                let mut out: [Option<&'a [u8]>; N] = [None; N];
+                let mut ok = true;
+                let mut s = ls;
+                let mut sq = lq;
+                let ent = &idx[j..j + N];
+                for (o, &(pe, q)) in out.iter_mut().zip(ent) {
+                    let p = (pe & !NL_BIT) as usize;
+                    let nq = q.wrapping_sub(sq);
+                    // SAFETY: s <= p <= len, and with p - s >= 2 both s and p - 1 are < len.
+                    let strip = nq == 2 && p - s >= 2 && unsafe { *chunk.get_unchecked(s) == b'"' && *chunk.get_unchecked(p - 1) == b'"' };
+                    ok &= nq == 0 || strip;
+                    let (a, b) = if strip { (s + 1, p - 1) } else { (s, p) };
+                    // SAFETY: a <= b <= len.
+                    *o = if a < b { Some(unsafe { chunk.get_unchecked(a..b) }) } else { None };
+                    s = p + 1;
+                    sq = q;
                 }
-                k += 1;
-                if k == N {
+                if ok && (N > 1 || s - 1 > ls) {
                     f(&out);
                 }
+                ls = s;
+                lq = sq;
+                j += N;
+            } else {
+                while idx[j].0 & NL_BIT == 0 {
+                    j += 1;
+                }
+                ls = (idx[j].0 & !NL_BIT) as usize + 1;
+                lq = idx[j].1;
+                j += 1;
             }
+        }
+        idx.drain(..complete);
+        if done {
+            break;
         }
     }
 }
@@ -385,6 +403,12 @@ mod tests {
             let mut got: Vec<[Option<Vec<u8>>; N]> = Vec::new();
             for_each_line::<N>(chunk, |o| got.push(o.map(|x| x.map(|v| v.to_vec()))));
             assert_eq!(got, want, "chunk {:?}", String::from_utf8_lossy(chunk));
+            // Tiny index windows, so lines cross window boundaries (ADR-045).
+            for window in [1usize, 2, 3, 7, 16] {
+                let mut got: Vec<[Option<Vec<u8>>; N]> = Vec::new();
+                scan_windows::<N>(chunk, window, |o| got.push(o.map(|x| x.map(|v| v.to_vec()))));
+                assert_eq!(got, want, "window {window} chunk {:?}", String::from_utf8_lossy(chunk));
+            }
         }
         let mut chunk = Vec::new();
         for i in 0..60_000u32 {
