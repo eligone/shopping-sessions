@@ -14,7 +14,7 @@ use crate::sessions::{self, UserDay};
 use crate::table::FlatMap;
 use rayon::prelude::*;
 
-pub const PART_BITS: u32 = 8;
+pub const PART_BITS: u32 = 9; // 512 partitions (ADR-052)
 pub const PARTS: usize = 1 << PART_BITS;
 
 /// Bucket / partition of a key. Taken from the MIDDLE of the hash: hash tables use
